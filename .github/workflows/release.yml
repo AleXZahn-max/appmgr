@@ -76,9 +76,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Generate SHA256SUMS
+      - name: Flatten artifacts and generate SHA256SUMS
         run: |
           cd dist
+          # Ensure all downloaded files are flattened into dist/ even if nested in artifact subfolders
+          find . -mindepth 2 -type f -exec mv -t . {} +
+          # Remove any leftover subdirectories
+          find . -mindepth 1 -type d -exec rm -rf {} +
+          ls -la
+          # Generate clean SHA256SUMS for regular release files
           rm -f SHA256SUMS
           for f in appmgr-*-linux *.tar.gz; do
             [ -f "$f" ] && sha256sum "$f"
