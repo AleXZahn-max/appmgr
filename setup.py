@@ -7,7 +7,7 @@ setup(
     author="Alex Zahn",
     packages=find_packages(),
     scripts=["bin/appmgr"],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     classifiers=[
         "Environment :: Console",
         "Operating System :: POSIX :: Linux",

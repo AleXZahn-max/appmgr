@@ -1,11 +1,11 @@
-# ⚡ AppMgr — Universal Linux Application Combine
+# AppMgr — Universal Linux Application Combine
 
 <div align="center">
 
 [![Version](https://img.shields.io/badge/version-1.4.0--beta-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
-[![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#-project-status)
+[![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![Discord](https://img.shields.io/badge/Discord-AleXZahn__-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
 [![Built With](https://img.shields.io/badge/Built%20With-Antigravity%20(Neon%20xHigh)-9B51E0?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr)
@@ -14,20 +14,44 @@
 
 </div>
 
+```text
+┌─── appmgr v1.4.0 — Universal Linux Application Combine ────────────────────────────────┐
+│                                                                                        │
+│  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
+│  Reading package lists... Done                                                         │
+│  Building dependency tree... Done                                                      │
+│                                                                                        │
+│  Packages (1) btop-1.4.0-x86_64.tar.zst [NEW]                                          │
+│                                                                                        │
+│  Total Download Size:    1.82 MiB                                                      │
+│  Total Installed Size:   4.95 MiB                                                      │
+│                                                                                        │
+│  :: Proceed with installation? [Y/n] y                                                 │
+│  (1/1) Downloading btop-x86_64.tar.zst  (████████████ C • • • • • • •)  62%            │
+│  (1/1) Validating SHA-256 checksum...                              [ OK ]              │
+│  (1/1) Unpacking application files...                              [ OK ]              │
+│  :: Setting up environment wrapper into ~/.local/bin/btop...       [ OK ]              │
+│  :: Processing triggers for desktop-file-utils...                  [ OK ]              │
+│                                                                                        │
+│  [ OK ] btop installed successfully! Run with: btop                                    │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
+<a id="project-status"></a>
 > [!IMPORTANT]
-> ### 🚧 Project Status: Active Beta Development
+> ### Project Status: Active Beta Development
 > **AppMgr** is currently under active development. Features are rapidly evolving, and new capabilities are being continuously added.
 > * If you encounter bugs, regressions, or have feature requests, please report them directly via **Discord**: `AleXZahn_`.
 
 > [!NOTE]
-> ### 🤖 Authorship & Development
+> ### Authorship & Development
 > This software is developed solo by **AleXZahn** with the assistance of the AI IDE agent **Antigravity (Neon xHigh)**.
 
 ---
 
-## 🌟 What is AppMgr?
+## Overview
 
 **AppMgr** is an all-in-one application manager and isolation combine designed for Linux systems (Arch Linux, CachyOS, Debian, Ubuntu, Fedora, openSUSE, and more). It allows you to install, isolate, search, configure, upgrade, and manage applications from various formats seamlessly—without root requirements and without cluttering or breaking your system package manager (Pacman, APT, DNF).
 
@@ -38,7 +62,7 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 
 ---
 
-## 💎 Key Strengths & Architectural Advantages
+## Key Strengths & Architecture
 
 1. **Zero System Package Manager Conflicts**:
    Applications reside in dedicated rootless directories (`~/.local/share/appmgr/apps/<name>/` or `/opt/appmgr/apps/<name>/` in system mode). Your base system package database remains untouched and pristine.
@@ -61,7 +85,7 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
    Automatically detects and downloads checksum files (`sha256sum.txt`, `SHA256SUMS`, `checksums.txt`, `*.sha256`) or asset digest hashes, validating downloaded archives before execution.
 
 7. **Persistent Environment Variables & Launch Flags**:
-   Assign custom environment variables and runtime flags (such as Wayland or Ozone parameters) per application. AppMgr preserves these configurations across updates.
+   Assign custom environment variables and runtime flags (such as Ozone hints or toolkit backends) per application. AppMgr preserves these configurations across updates.
 
 8. **Atomic Upgrades & Rollback Cache**:
    During upgrades, AppMgr automatically creates an archive backup of the prior working version. If an update fails, AppMgr rolls back instantly. You can also manually revert using `appmgr rollback <app>`.
@@ -71,7 +95,7 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 
 ---
 
-## 📦 Supported Formats
+## Supported Formats
 
 | Format | Type Badge | Description |
 | :--- | :---: | :--- |
@@ -83,10 +107,43 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 
 ---
 
-## 🛠️ Installation & Building
+## System Requirements
+
+AppMgr relies exclusively on the **Python standard library** and standard Linux utilities. No third-party `pip` modules are required.
+
+### Core Dependencies
+* **Python**: 3.10 or higher
+* **tar**: Standard archive extraction
+* **desktop-file-utils**: Updating desktop database triggers
+
+### Recommended Tools
+* **bubblewrap (`bwrap`)**: Rootless `/opt` filesystem virtualization for proprietary `.deb` packages
+* **fuse2 / libfuse2**: Native FUSE mounting for AppImages
+* **zstd / xz**: Decompressing `.tar.zst` and `.tar.xz` archives
+
+### Quick Install Commands
+
+**Arch Linux / CachyOS:**
+```bash
+sudo pacman -S python tar xz zstd desktop-file-utils bubblewrap fuse2
+```
+
+**Debian / Ubuntu:**
+```bash
+sudo apt install python3 tar xz-utils zstd desktop-file-utils bubblewrap libfuse2
+```
+
+**Fedora:**
+```bash
+sudo dnf install python3 tar xz zstd desktop-file-utils bubblewrap fuse
+```
+
+---
+
+## Installation & Building
 
 ### Option 1: Fast User Installation (Recommended)
-Installs AppMgr into `~/.local/bin` and user data directories (no sudo required):
+Installs AppMgr into `~/.local/bin` and user data directories (no root/sudo required):
 ```bash
 git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr
@@ -95,27 +152,39 @@ cd appmgr
 
 ### Option 2: Using Makefile
 ```bash
-# For current user (~/.local):
+git clone https://github.com/AleXZahn-max/appmgr.git
+cd appmgr
+
+# For current user (~/.local, rootless):
 make install-user
 
 # System-wide (/usr/local, requires sudo):
 sudo make install
 ```
 
-### Option 3: Arch Linux / CachyOS Package
+### Option 3: Arch Linux / CachyOS Package (PKGBUILD)
 Build and install via `PKGBUILD`:
 ```bash
+git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr
 makepkg -si
 ```
 
 ---
 
-## 📖 Command Reference & Examples
+## Command Reference & Examples
 
-### 1. Installing Applications
+### 1. Searching Applications (`search`)
+Search GitHub for software repositories interactively with star counts and descriptions:
 ```bash
-# Search and install interactively by app name:
+# Search by keyword:
+appmgr search btop
+appmgr search "terminal file manager"
+```
+
+### 2. Installing Applications (`install`)
+```bash
+# Interactive GitHub repository search and install by name:
 appmgr install btop
 
 # Install specific GitHub repository release:
@@ -140,19 +209,27 @@ appmgr install ~/Downloads/tool.zip
 appmgr install btop -y
 ```
 
-### 2. Managing Environment Variables (`env`)
+### 3. Linking Applications to GitHub (`link`)
+Link an already installed application (e.g. installed from a local file) to a GitHub repository to enable automatic update checking:
 ```bash
-# Set custom environment variables (e.g., Wayland flags):
-appmgr env obsidian WAYLAND_DISPLAY=wayland-0 ELECTRON_OZONE_PLATFORM_HINT=auto
+# Link application to GitHub repo:
+appmgr link obsidian obsidianmd/obsidian-releases
+appmgr link discord discord/discord-linux
+```
+
+### 4. Managing Environment Variables (`env`)
+```bash
+# Set custom persistent environment variables:
+appmgr env obsidian ELECTRON_OZONE_PLATFORM_HINT=auto QT_QPA_PLATFORM=wayland
 
 # View configured variables:
 appmgr env obsidian --list
 
 # Unset a variable:
-appmgr env obsidian --unset WAYLAND_DISPLAY
+appmgr env obsidian --unset QT_QPA_PLATFORM
 ```
 
-### 3. Persistent Launch Arguments (`args`)
+### 5. Persistent Launch Arguments (`args`)
 ```bash
 # Set permanent CLI flags passed to the binary on every start:
 appmgr args btop --utf-force --low-color
@@ -164,7 +241,7 @@ appmgr args btop --list
 appmgr args btop --clear
 ```
 
-### 4. Version Freezing (Pinning)
+### 6. Version Freezing (`pin` / `unpin`)
 ```bash
 # Freeze package version to skip during general upgrades:
 appmgr pin btop
@@ -179,7 +256,7 @@ appmgr upgrade btop --force
 appmgr unpin btop
 ```
 
-### 5. Checking & Upgrading Packages
+### 7. Checking & Upgrading Packages (`upgrade`)
 ```bash
 # Multi-threaded check for updates without installing:
 appmgr upgrade --check
@@ -194,7 +271,7 @@ appmgr upgrade -y
 appmgr upgrade gh
 ```
 
-### 6. Rollback & Cache Cleanup
+### 8. Rollback & Cache Cleanup (`rollback` / `clean`)
 ```bash
 # Restore previous version from rollback backup:
 appmgr rollback btop
@@ -203,7 +280,7 @@ appmgr rollback btop
 appmgr clean -y
 ```
 
-### 7. Exporting & Importing Application Manifests
+### 9. Exporting & Importing Application Manifests (`export` / `import`)
 ```bash
 # Export all installed applications and configurations:
 appmgr export my-apps.json
@@ -212,7 +289,7 @@ appmgr export my-apps.json
 appmgr import my-apps.json -y
 ```
 
-### 8. System Diagnostics & Info
+### 10. System Diagnostics & Inspection (`doctor` / `info` / `run`)
 ```bash
 # Run comprehensive diagnostic checks (FUSE, bwrap, libraries, PATH):
 appmgr doctor
@@ -224,14 +301,14 @@ appmgr info btop
 appmgr run btop
 ```
 
-### 9. Removing Applications
+### 11. Removing Applications (`remove`)
 ```bash
 appmgr remove btop -y
 ```
 
 ---
 
-## 🤝 Feedback & Bug Reports
+## Feedback & Bug Reports
 
 Found an issue or have an idea?
 * **Discord**: `AleXZahn_`
@@ -239,6 +316,6 @@ Found an issue or have an idea?
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).

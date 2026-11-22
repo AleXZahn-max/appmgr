@@ -6,7 +6,7 @@ pkgdesc="Universal Linux Application Combine (.deb, .AppImage, .tar.*, .zip, Sta
 arch=('any')
 url="https://github.com/AleXZahn-max/appmgr"
 license=('MIT')
-depends=('python' 'tar' 'desktop-file-utils')
+depends=('python>=3.10' 'tar' 'desktop-file-utils')
 optdepends=(
     'binutils: native AR archive support'
     'zstd: Zstandard compressed archives and packages support'
