@@ -69,7 +69,7 @@ impl SelfUpdater {
             c(latest_tag, &[Colors::BOLD, Colors::BRIGHT_GREEN])
         );
 
-        if latest_tag == current_ver {
+        if GitHubClient::compare_versions(latest_tag, current_ver) != std::cmp::Ordering::Greater {
             println!(
                 "\n{} appmgr is already up to date ({})\n",
                 apt_prefix("OK"),

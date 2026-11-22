@@ -636,6 +636,46 @@ impl GitHubClient {
 
         None
     }
+
+    /// Compare two version strings (handles semver, prefixes like 'v', 'jq-', and prerelease tags)
+    pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+        fn extract_parts(v: &str) -> (Vec<u64>, Option<&str>) {
+            let start = v.find(|c: char| c.is_ascii_digit()).unwrap_or(v.len());
+            let s = &v[start..];
+
+            let (num_part, pre_part) = if let Some(idx) = s.find(['-', '+', '~']) {
+                (&s[..idx], Some(&s[idx + 1..]))
+            } else {
+                (s, None)
+            };
+
+            let nums: Vec<u64> = num_part
+                .split('.')
+                .filter_map(|p| p.parse::<u64>().ok())
+                .collect();
+
+            (nums, pre_part)
+        }
+
+        let (n1, p1) = extract_parts(v1);
+        let (n2, p2) = extract_parts(v2);
+
+        let max_len = n1.len().max(n2.len());
+        for i in 0..max_len {
+            let a = n1.get(i).copied().unwrap_or(0);
+            let b = n2.get(i).copied().unwrap_or(0);
+            if a != b {
+                return a.cmp(&b);
+            }
+        }
+
+        match (p1, p2) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(a), Some(b)) => a.cmp(b),
+        }
+    }
 }
 
 mod urlencoding {
@@ -669,11 +709,22 @@ mod tests {
         assert_eq!(repo2, Some("owner/repo".to_string()));
         assert_eq!(tag2, Some("1.4.0-beta".to_string()));
 
-        let is_newer = |cur: &str, new: &str| {
-            new.trim_start_matches('v') != cur.trim_start_matches('v')
-        };
-        assert!(is_newer("1.4.0", "v2.0.0"));
-        assert!(!is_newer("v2.0.0", "2.0.0"));
+        assert_eq!(
+            GitHubClient::compare_versions("v2.0.0", "1.4.0-beta"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("1.4.0-beta", "2.0.0"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("v2.0.0", "2.0.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("1.4.0", "1.4.0-beta"),
+            std::cmp::Ordering::Greater
+        );
     }
 
     #[test]

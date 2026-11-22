@@ -681,8 +681,12 @@ impl Core {
                         let current_tag = pkg.tag.as_deref().unwrap_or("");
                         let current_ver = &pkg.version;
 
-                        let is_newer = (new_tag != current_tag)
-                            && (new_tag.trim_start_matches('v') != current_ver.trim_start_matches('v'));
+                        let is_newer = GitHubClient::compare_versions(&new_tag, current_ver)
+                            == std::cmp::Ordering::Greater
+                            || (new_tag != current_tag
+                                && !current_tag.is_empty()
+                                && GitHubClient::compare_versions(&new_tag, current_ver)
+                                    != std::cmp::Ordering::Less);
 
                         if is_newer {
                             let pref_format = pref.as_deref().unwrap_or(&pkg.format);
@@ -1080,6 +1084,11 @@ impl Core {
 
         if let Some(key) = unset_key {
             self.db.unset_env(&pkg.id, key).map_err(|e| e.to_string())?;
+            if let Some(updated) = self.db.get(&pkg.id) {
+                if let Some(bin) = updated.binaries.first() {
+                    let _ = Self::update_wrapper_script(bin, &updated.env, &updated.args);
+                }
+            }
             println!(
                 " {} Unset {} for {}.",
                 apt_prefix("OK"),
@@ -1105,6 +1114,11 @@ impl Core {
         if !new_vars.is_empty() {
             let keys: Vec<String> = new_vars.keys().cloned().collect();
             self.db.set_env(&pkg.id, new_vars).map_err(|e| e.to_string())?;
+            if let Some(updated) = self.db.get(&pkg.id) {
+                if let Some(bin) = updated.binaries.first() {
+                    let _ = Self::update_wrapper_script(bin, &updated.env, &updated.args);
+                }
+            }
             println!(
                 " {} Updated environment variables for {}: {}",
                 apt_prefix("OK"),
@@ -1145,6 +1159,11 @@ impl Core {
 
         if clear {
             self.db.clear_args(&pkg.id).map_err(|e| e.to_string())?;
+            if let Some(updated) = self.db.get(&pkg.id) {
+                if let Some(bin) = updated.binaries.first() {
+                    let _ = Self::update_wrapper_script(bin, &updated.env, &updated.args);
+                }
+            }
             println!(" {} Cleared persistent arguments for {}.", apt_prefix("OK"), pkg.name);
             return Ok(true);
         }
@@ -1153,6 +1172,11 @@ impl Core {
             self.db
                 .set_args(&pkg.id, args_list.to_vec())
                 .map_err(|e| e.to_string())?;
+            if let Some(updated) = self.db.get(&pkg.id) {
+                if let Some(bin) = updated.binaries.first() {
+                    let _ = Self::update_wrapper_script(bin, &updated.env, &updated.args);
+                }
+            }
             println!(
                 " {} Updated launch arguments for {}: {}",
                 apt_prefix("OK"),
@@ -1161,6 +1185,86 @@ impl Core {
             );
         }
         Ok(true)
+    }
+
+    pub fn update_wrapper_script(
+        launcher_path: &Path,
+        env: &HashMap<String, String>,
+        args: &[String],
+    ) -> Result<(), String> {
+        if !launcher_path.is_file() {
+            return Ok(());
+        }
+
+        let mut content = fs::read_to_string(launcher_path).map_err(|e| e.to_string())?;
+
+        let args_block = if args.is_empty() {
+            "PERSISTENT_ARGS=()\n".to_string()
+        } else {
+            let quoted: Vec<String> = args
+                .iter()
+                .map(|a| format!("    \"{}\"", a.replace('"', "\\\"")))
+                .collect();
+            format!("PERSISTENT_ARGS=(\n{}\n)\n", quoted.join("\n"))
+        };
+
+        let re_args = regex::Regex::new(r"(?s)PERSISTENT_ARGS=\(.*?\)\n?").map_err(|e| e.to_string())?;
+        if re_args.is_match(&content) {
+            content = re_args.replace(&content, &args_block).to_string();
+        } else if let Some(pos) = content.rfind("exec ") {
+            content.insert_str(pos, &format!("{}\n", args_block));
+        } else {
+            content.push_str(&format!("\n{}\n", args_block));
+        }
+
+        if !content.contains("${PERSISTENT_ARGS[@]}") {
+            content = content.replace("\"$@\"", "\"${PERSISTENT_ARGS[@]}\" \"$@\"");
+        }
+
+        let standard_exports = [
+            "PATH",
+            "LD_LIBRARY_PATH",
+            "XDG_DATA_DIRS",
+            "APPIMAGE_EXTRACT_AND_RUN",
+            "CONTAINER_BIN",
+            "TARGET_BIN",
+        ];
+        let lines: Vec<&str> = content.lines().collect();
+        let mut filtered_lines = Vec::new();
+        for line in lines {
+            let trimmed = line.trim();
+            if let Some(var_part) = trimmed.strip_prefix("export ") {
+                let var_name = var_part.split('=').next().unwrap_or("").trim();
+                if !standard_exports.contains(&var_name) {
+                    continue;
+                }
+            }
+            filtered_lines.push(line);
+        }
+
+        let mut new_content = filtered_lines.join("\n");
+        if !env.is_empty() {
+            let mut env_lines = Vec::new();
+            for (k, v) in env {
+                env_lines.push(format!("export {}=\"{}\"", k, v.replace('"', "\\\"")));
+            }
+            let env_block = format!("\n{}\n", env_lines.join("\n"));
+            if let Some(pos) = new_content.find("PERSISTENT_ARGS=") {
+                new_content.insert_str(pos, &env_block);
+            } else {
+                new_content.push_str(&env_block);
+            }
+        }
+
+        fs::write(launcher_path, new_content).map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(launcher_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(perms.mode() | 0o755);
+            let _ = fs::set_permissions(launcher_path, perms);
+        }
+
+        Ok(())
     }
 
     pub fn pin_app(&mut self, app_id: &str) -> Result<bool, String> {
