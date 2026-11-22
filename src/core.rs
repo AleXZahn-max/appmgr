@@ -335,6 +335,8 @@ impl Core {
             .await?;
 
         let pattern = GitHubClient::derive_pattern(&chosen.name, &release.tag_name);
+        let app_hint = repo.split('/').next_back().unwrap_or(repo);
+        let clean_bin = Some(crate::registry::clean_binary_name(&chosen.name, app_hint));
 
         self.install_local_file(
             &local_archive,
@@ -347,7 +349,7 @@ impl Core {
             None,
             None,
             false,
-            None,
+            clean_bin,
         )
     }
 
@@ -408,7 +410,7 @@ impl Core {
                 p.read_metadata()?
             }
             PackageFormat::Binary => {
-                let p = BinaryPackage::new(path, &self.config, repo.clone(), github_tag.clone());
+                let p = BinaryPackage::new(path, &self.config, repo.clone(), github_tag.clone(), clean_bin_name.clone());
                 p.read_metadata()?
             }
             PackageFormat::ArchNative => unreachable!(),
@@ -462,7 +464,7 @@ impl Core {
                 p.install(force, env, args)?
             }
             PackageFormat::Binary => {
-                let p = BinaryPackage::new(path, &self.config, repo.clone(), github_tag.clone());
+                let p = BinaryPackage::new(path, &self.config, repo.clone(), github_tag.clone(), clean_bin_name.clone());
                 p.install(force, env, args)?
             }
             PackageFormat::ArchNative => unreachable!(),
@@ -483,7 +485,7 @@ impl Core {
         if let Some(clean_name) = desired_clean_name {
             let clean_launcher_path = self.config.bin_dir.join(&clean_name);
             if let Some(primary_bin) = record.binaries.first().cloned() {
-                if primary_bin != clean_launcher_path {
+                if primary_bin != clean_launcher_path && !record.binaries.contains(&clean_launcher_path) {
                     let _ = fs::remove_file(&clean_launcher_path);
                     #[cfg(unix)]
                     {
@@ -2401,22 +2403,37 @@ impl Core {
         )?;
 
         if installed {
-            if let Some(record) = self.db.get_mut(&pkg.id) {
-                record.name = pkg.name.clone();
-                record.source_type = Some(source_type);
-                record.recipe_id = Some(pkg.id.clone());
-                record.registry_name = Some(repo_name.to_string());
-                record.description = Some(pkg.description.clone());
-                if let Some(gui) = pkg.gui {
-                    record.is_gui = Some(gui);
-                }
-                if let Some(ref r) = pkg.runtime {
-                    record.default_env = r.default_env.clone();
-                    record.default_args = r.default_args.clone();
-                }
-                if let Some(ref s) = pkg.sandbox {
-                    record.bwrap = s.bwrap;
-                    record.bind_opt = s.bind_opt.clone();
+            let found_id = if self.db.get(&pkg.id).is_some() {
+                Some(pkg.id.clone())
+            } else {
+                self.db
+                    .all()
+                    .iter()
+                    .find(|p| {
+                        p.recipe_id.as_deref() == Some(&pkg.id)
+                            || p.name.to_lowercase() == pkg.name.to_lowercase()
+                    })
+                    .map(|p| p.id.clone())
+            };
+
+            if let Some(ref id) = found_id {
+                if let Some(record) = self.db.get_mut(id) {
+                    record.name = pkg.name.clone();
+                    record.source_type = Some(source_type);
+                    record.recipe_id = Some(pkg.id.clone());
+                    record.registry_name = Some(repo_name.to_string());
+                    record.description = Some(pkg.description.clone());
+                    if let Some(gui) = pkg.gui {
+                        record.is_gui = Some(gui);
+                    }
+                    if let Some(ref r) = pkg.runtime {
+                        record.default_env = r.default_env.clone();
+                        record.default_args = r.default_args.clone();
+                    }
+                    if let Some(ref s) = pkg.sandbox {
+                        record.bwrap = s.bwrap;
+                        record.bind_opt = s.bind_opt.clone();
+                    }
                 }
                 let _ = self.db.save();
             }

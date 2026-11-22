@@ -13,6 +13,7 @@ pub struct BinaryPackage {
     pub config: Config,
     pub repo: Option<String>,
     pub tag: Option<String>,
+    pub clean_name: Option<String>,
 }
 
 impl BinaryPackage {
@@ -21,12 +22,14 @@ impl BinaryPackage {
         config: &Config,
         repo: Option<String>,
         tag: Option<String>,
+        clean_name: Option<String>,
     ) -> Self {
         Self {
             file_path: file_path.to_path_buf(),
             config: config.clone(),
             repo,
             tag,
+            clean_name,
         }
     }
 
@@ -69,7 +72,11 @@ impl BinaryPackage {
             .unwrap_or_else(|| "binary".to_string());
 
         let raw_name = stem.trim_end_matches(".bin");
-        let pkg_id = Self::sanitize_name(raw_name);
+        let pkg_id = self
+            .clean_name
+            .as_deref()
+            .map(Self::sanitize_name)
+            .unwrap_or_else(|| Self::sanitize_name(raw_name));
         let version = self.tag.clone().unwrap_or_else(|| "1.0.0".to_string());
         let desc = format!("Standalone binary executable: {}", pkg_id);
         let size = buffer.len() as u64;
