@@ -18,6 +18,7 @@ source=()
 
 build() {
     cd "$startdir"
+    unset CFLAGS CXXFLAGS LDFLAGS RUSTFLAGS
     cargo build --release --locked
 }
 

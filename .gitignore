@@ -24,7 +24,6 @@ MANIFEST
 
 # Rust build artifacts
 target/
-Cargo.lock
 
 # Arch Linux packaging artifacts
 pkg/
