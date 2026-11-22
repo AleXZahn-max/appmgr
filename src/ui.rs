@@ -286,7 +286,10 @@ pub fn print_banner() {
             "Universal Linux Application Combine",
             &[Colors::BOLD, Colors::BRIGHT_WHITE]
         ),
-        c("v2.0.0 (Rust)", &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+        c(
+            &format!("v{} (Rust)", env!("CARGO_PKG_VERSION")),
+            &[Colors::BOLD, Colors::BRIGHT_YELLOW]
+        )
     );
 }
 

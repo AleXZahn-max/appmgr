@@ -1304,7 +1304,7 @@ impl Core {
     pub fn export_manifest(&self, output_path: Option<&str>) -> Result<bool, String> {
         let all_pkgs = self.db.all();
         let manifest_data = json!({
-            "appmgr_version": "2.0.0",
+            "appmgr_version": env!("CARGO_PKG_VERSION"),
             "export_date": chrono::Local::now().to_rfc3339(),
             "applications": all_pkgs.iter().map(|p| {
                 json!({

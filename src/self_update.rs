@@ -172,20 +172,43 @@ impl SelfUpdater {
             )
             .await?;
 
-        fs::set_permissions(&temp_new_bin, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to set permissions: {}", e))?;
+        let parent_dir = current_exe
+            .parent()
+            .ok_or_else(|| "Failed to determine parent directory of current executable".to_string())?;
 
-        // Atomic replacement: rename current_exe to current_exe.old, rename new to current_exe
-        let backup_exe = current_exe.with_extension("old");
-        fs::rename(&current_exe, &backup_exe)
-            .map_err(|e| format!("Failed to backup current executable: {}", e))?;
+        let pid = std::process::id();
+        let staged_bin = parent_dir.join(format!(".appmgr.new.{}", pid));
+        let backup_bin = parent_dir.join(format!(".appmgr.bak.{}", pid));
 
-        if let Err(e) = fs::rename(&temp_new_bin, &current_exe) {
-            let _ = fs::rename(&backup_exe, &current_exe);
+        // 1. Copy downloaded new binary to staging file on the same filesystem
+        if let Err(e) = fs::copy(&temp_new_bin, &staged_bin) {
+            let _ = fs::remove_file(&staged_bin);
+            return Err(format!("Failed to stage new binary in {}: {}", parent_dir.display(), e));
+        }
+
+        // 2. Set executable permissions
+        if let Err(e) = fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)) {
+            let _ = fs::remove_file(&staged_bin);
+            return Err(format!("Failed to set permissions on staged binary: {}", e));
+        }
+
+        // 3. Move current running binary to backup in the same directory (solves ETXTBSY)
+        if let Err(e) = fs::rename(&current_exe, &backup_bin) {
+            let _ = fs::remove_file(&staged_bin);
+            return Err(format!("Failed to backup current executable: {}", e));
+        }
+
+        // 4. Atomically rename staged binary to current_exe on the same filesystem (solves EXDEV)
+        if let Err(e) = fs::rename(&staged_bin, &current_exe) {
+            let _ = fs::rename(&backup_bin, &current_exe);
+            let _ = fs::remove_file(&staged_bin);
+            let _ = fs::remove_file(&backup_bin);
             return Err(format!("Failed to install new executable (rolled back): {}", e));
         }
 
-        let _ = fs::remove_file(&backup_exe);
+        // 5. Clean up backup and staged temporary files
+        let _ = fs::remove_file(&backup_bin);
+        let _ = fs::remove_file(&staged_bin);
 
         println!(
             "\n{} Successfully updated appmgr to {}! ({})\n",
@@ -195,5 +218,40 @@ impl SelfUpdater {
         );
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_atomic_binary_replacement() {
+        let dir = tempdir().unwrap();
+        let current_exe = dir.path().join("appmgr");
+        fs::write(&current_exe, b"old_version_binary").unwrap();
+
+        let external_dir = tempdir().unwrap();
+        let downloaded = external_dir.path().join("downloaded.bin");
+        fs::write(&downloaded, b"new_version_binary").unwrap();
+
+        let parent_dir = current_exe.parent().unwrap();
+        let pid = std::process::id();
+        let staged_bin = parent_dir.join(format!(".appmgr.new.{}", pid));
+        let backup_bin = parent_dir.join(format!(".appmgr.bak.{}", pid));
+
+        // Copy across "devices"
+        fs::copy(&downloaded, &staged_bin).unwrap();
+        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Atomic swap
+        fs::rename(&current_exe, &backup_bin).unwrap();
+        fs::rename(&staged_bin, &current_exe).unwrap();
+        fs::remove_file(&backup_bin).unwrap();
+
+        assert_eq!(fs::read(&current_exe).unwrap(), b"new_version_binary");
+        assert!(!staged_bin.exists());
+        assert!(!backup_bin.exists());
     }
 }

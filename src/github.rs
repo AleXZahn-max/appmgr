@@ -73,7 +73,10 @@ impl GitHubClient {
 
     fn headers(&self, etag: Option<&str>) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("appmgr/2.0.0"));
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(concat!("appmgr/", env!("CARGO_PKG_VERSION"))),
+        );
         headers.insert(
             ACCEPT,
             HeaderValue::from_static("application/vnd.github.v3+json"),
@@ -547,8 +550,11 @@ impl GitHubClient {
             }
         }
 
-        std::fs::rename(&temp_dest, dest_path)
-            .map_err(|e| format!("Failed to move finished download: {}", e))?;
+        if std::fs::rename(&temp_dest, dest_path).is_err() {
+            std::fs::copy(&temp_dest, dest_path)
+                .map_err(|e| format!("Failed to move finished download: {}", e))?;
+            let _ = std::fs::remove_file(&temp_dest);
+        }
         Ok(())
     }
 

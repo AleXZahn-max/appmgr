@@ -87,7 +87,10 @@ impl Database {
             file.write_all(content.as_bytes())?;
             file.sync_all()?;
         }
-        fs::rename(tmp_path, &self.path)?;
+        if fs::rename(&tmp_path, &self.path).is_err() {
+            fs::copy(&tmp_path, &self.path)?;
+            let _ = fs::remove_file(&tmp_path);
+        }
         Ok(())
     }
 

@@ -6,7 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_BIN="$HOME/.local/bin"
 
-echo -e "\033[1;36m::\033[0m \033[1;37mBuilding and installing appmgr v2.0.0 (Rust)...\033[0m"
+echo -e "\033[1;36m::\033[0m \033[1;37mBuilding and installing appmgr v2.0.1 (Rust)...\033[0m"
 
 # Ensure Rust/Cargo is available
 if ! command -v cargo &>/dev/null; then
@@ -50,7 +50,7 @@ for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
     fi
 done
 
-echo -e "\033[1;32m[  OK  ]\033[0m appmgr v2.0.0 binary installed to: \033[1;33m$TARGET_BIN/appmgr\033[0m"
+echo -e "\033[1;32m[  OK  ]\033[0m appmgr v2.0.1 binary installed to: \033[1;33m$TARGET_BIN/appmgr\033[0m"
 echo -e "\033[1;32m[  OK  ]\033[0m Shell completions (bash, zsh, fish) generated and installed."
 echo
 echo -e "\033[1;36m::\033[0m Test the installation with: \033[1;32mappmgr --version\033[0m or \033[1;32mappmgr doctor\033[0m"
