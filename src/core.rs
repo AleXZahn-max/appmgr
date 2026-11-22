@@ -19,20 +19,43 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn recipe_to_registry_package(r: &crate::registry::Recipe) -> crate::registry::RegistryPackage {
+    crate::registry::RegistryPackage {
+        id: r.package.id.clone(),
+        name: r.package.name.clone(),
+        description: r.package.description.clone(),
+        homepage: r.package.homepage.clone(),
+        license: r.package.license.clone(),
+        categories: r.package.categories.clone(),
+        format: r.package.format.clone(),
+        bin_name: r.package.bin_name.clone(),
+        gui: r.package.gui,
+        source: r.source.clone(),
+        runtime: r.runtime.clone(),
+        sandbox: r.sandbox.clone(),
+    }
+}
+
 pub struct Core {
     pub config: Config,
     pub db: Database,
     pub github: GitHubClient,
+    pub http_client: reqwest::Client,
 }
 
 impl Core {
     pub fn new(config: &Config) -> Self {
         let _ = config.ensure_dirs();
         let db = Database::load(&config.db_file);
+        let http_client = reqwest::Client::builder()
+            .user_agent("appmgr")
+            .build()
+            .unwrap_or_default();
         Self {
             config: config.clone(),
             db,
             github: GitHubClient::new(),
+            http_client,
         }
     }
 
@@ -47,6 +70,14 @@ impl Core {
     ) -> Result<bool, String> {
         let local_path = Path::new(target_str);
         if local_path.is_file() {
+            if target_str.ends_with(".toml") {
+                let recipe = crate::registry::pkg_lint(local_path)
+                    .map_err(|errs| format!("Recipe linting error:\n{}", errs.join("\n")))?;
+                let pkg = recipe_to_registry_package(&recipe);
+                return self
+                    .install_from_registry_package("local", &pkg, force, assume_yes, prefer, include_pre)
+                    .await;
+            }
             return self.install_local_file(
                 local_path,
                 force,
@@ -58,7 +89,20 @@ impl Core {
                 None,
                 None,
                 false,
+                None,
             );
+        }
+
+        // Check if target matches a package in any active registry
+        let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
+        if let Some((repo_name, pkg)) = crate::registry::find_package_in_registries(
+            &self.config.registries_cache_dir,
+            &sources,
+            target_str,
+        ) {
+            return self
+                .install_from_registry_package(&repo_name, &pkg, force, assume_yes, prefer, include_pre)
+                .await;
         }
 
         let (parsed_repo, tag) = GitHubClient::parse_repo_and_tag(target_str);
@@ -303,6 +347,7 @@ impl Core {
             None,
             None,
             false,
+            None,
         )
     }
 
@@ -319,6 +364,7 @@ impl Core {
         env: Option<HashMap<String, String>>,
         args: Option<Vec<String>>,
         pinned: bool,
+        clean_bin_name: Option<String>,
     ) -> Result<bool, String> {
         let fmt = match detect_format(path) {
             Some(f) => f,
@@ -430,6 +476,25 @@ impl Core {
         }
         record.pinned = pinned;
 
+        // Clean binary launcher handling
+        let desired_clean_name = clean_bin_name
+            .or_else(|| Some(crate::registry::clean_binary_name(&record.id, &record.id)));
+
+        if let Some(clean_name) = desired_clean_name {
+            let clean_launcher_path = self.config.bin_dir.join(&clean_name);
+            if let Some(primary_bin) = record.binaries.first().cloned() {
+                if primary_bin != clean_launcher_path {
+                    let _ = fs::remove_file(&clean_launcher_path);
+                    #[cfg(unix)]
+                    {
+                        if std::os::unix::fs::symlink(&primary_bin, &clean_launcher_path).is_ok() {
+                            record.binaries.push(clean_launcher_path);
+                        }
+                    }
+                }
+            }
+        }
+
         println!(
             "Setting up {} ({}) ...",
             c(&record.name, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
@@ -477,7 +542,49 @@ impl Core {
         Ok(true)
     }
 
-    pub async fn search(&self, query: &str) -> Result<(), String> {
+    pub async fn search(&self, query: &str, offline: bool) -> Result<(), String> {
+        let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
+        let registry_matches = crate::registry::search_registries(
+            &self.config.registries_cache_dir,
+            &sources,
+            query,
+        );
+
+        if !registry_matches.is_empty() {
+            println!(
+                "\n{} Found {} package(s) in repositories for '{}':\n",
+                c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                registry_matches.len(),
+                c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+            );
+
+            let headers = ["REPO", "PACKAGE ID", "FORMAT", "NAME", "DESCRIPTION"];
+            let mut rows = Vec::new();
+
+            for (repo, pkg) in &registry_matches {
+                rows.push(vec![
+                    format!("[{}]", repo),
+                    c(&pkg.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                    format!("[{}]", pkg.format.to_uppercase()),
+                    pkg.name.clone(),
+                    pkg.description.clone(),
+                ]);
+            }
+
+            print_table(&headers, &rows);
+        }
+
+        if offline {
+            if registry_matches.is_empty() {
+                println!(
+                    "{} No packages matching '{}' found in repositories (offline mode).",
+                    apt_prefix("INFO"),
+                    query
+                );
+            }
+            return Ok(());
+        }
+
         println!(
             "{} Searching GitHub for '{}'...",
             c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
@@ -485,36 +592,47 @@ impl Core {
         );
 
         let spinner = Spinner::new(&format!("Querying GitHub Search API for '{}'...", query));
-        let repos = self.github.search_repositories(query, 8).await?;
+        let repos_res = self.github.search_repositories(query, 8).await;
         spinner.stop();
 
-        if repos.is_empty() {
-            println!(
-                "{} No repositories found matching '{}'.",
-                apt_prefix("FAIL"),
-                query
-            );
-            return Ok(());
+        match repos_res {
+            Ok(repos) => {
+                if repos.is_empty() {
+                    if registry_matches.is_empty() {
+                        println!(
+                            "{} No repositories or packages found matching '{}'.",
+                            apt_prefix("FAIL"),
+                            query
+                        );
+                    }
+                } else {
+                    println!(
+                        "\n{} Found {} GitHub repositories for '{}':\n",
+                        c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                        repos.len(),
+                        c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                    );
+
+                    for (i, repo) in repos.iter().enumerate() {
+                        let desc = repo.description.as_deref().unwrap_or("No description provided");
+                        println!(
+                            "  {} {} {} {}",
+                            c(&format!("{}.", i + 1), &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
+                            c(&repo.full_name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                            c(&format!("★ {}", repo.stargazers_count), &[Colors::BOLD, Colors::YELLOW]),
+                            c(&format!("- {}", desc), &[Colors::DIM, Colors::WHITE])
+                        );
+                    }
+                    println!();
+                }
+            }
+            Err(e) => {
+                if registry_matches.is_empty() {
+                    return Err(e);
+                }
+            }
         }
 
-        println!(
-            "\n{} Found {} repositories for '{}':\n",
-            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-            repos.len(),
-            c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
-        );
-
-        for (i, repo) in repos.iter().enumerate() {
-            let desc = repo.description.as_deref().unwrap_or("No description provided");
-            println!(
-                "  {} {} {} {}",
-                c(&format!("{}.", i + 1), &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
-                c(&repo.full_name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
-                c(&format!("★ {}", repo.stargazers_count), &[Colors::BOLD, Colors::YELLOW]),
-                c(&format!("- {}", desc), &[Colors::DIM, Colors::WHITE])
-            );
-        }
-        println!();
         Ok(())
     }
 
@@ -884,6 +1002,7 @@ impl Core {
                 Some(pkg.env.clone()),
                 Some(pkg.args.clone()),
                 pkg.pinned,
+                None,
             );
 
             match ok {
@@ -1500,9 +1619,44 @@ impl Core {
         }
 
         let pkg = match self.db.get(target) {
-            Some(p) => p,
+            Some(p) => p.clone(),
             None => {
-                println!("{} Package '{}' not found in database.", apt_prefix("FAIL"), target);
+                let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
+                if let Some((repo_name, rpkg)) = crate::registry::find_package_in_registries(
+                    &self.config.registries_cache_dir,
+                    &sources,
+                    target,
+                ) {
+                    println!("\n{}", c("Package Information (Registry):", &[Colors::BOLD, Colors::BRIGHT_WHITE]));
+                    println!("  {:<16} {}", c("Name:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.name);
+                    println!("  {:<16} {}", c("ID:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.id);
+                    println!("  {:<16} [{}]", c("Format:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.format.to_uppercase());
+                    println!("  {:<16} {}", c("Status:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), c("Available in Registry (Not Installed)", &[Colors::YELLOW]));
+                    println!("  {:<16} [{}]", c("Registry:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), repo_name);
+                    println!("  {:<16} {}", c("Source Type:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.source.source_type);
+                    println!("  {:<16} {}", c("Homepage:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.homepage);
+                    println!("  {:<16} {}", c("License:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.license);
+                    println!("  {:<16} {}", c("Categories:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.categories.join(", "));
+                    println!("  {:<16} {}", c("Description:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.description);
+                    if let Some(ref r) = rpkg.runtime {
+                        if let Some(ref envs) = r.default_env {
+                            let env_strs: Vec<String> = envs.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+                            println!("  {:<16} {}", c("Default Env:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), env_strs.join(", "));
+                        }
+                        if let Some(ref args) = r.default_args {
+                            println!("  {:<16} {}", c("Default Args:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), args.join(" "));
+                        }
+                    }
+                    if let Some(ref s) = rpkg.sandbox {
+                        if s.bwrap == Some(true) {
+                            println!("  {:<16} Bubblewrap (/opt isolated)", c("Sandbox:", &[Colors::BOLD, Colors::BRIGHT_CYAN]));
+                        }
+                    }
+                    println!("\n        Run {} to install this package.\n", c(&format!("appmgr install {}", rpkg.id), &[Colors::BOLD, Colors::BRIGHT_YELLOW]));
+                    return;
+                }
+
+                println!("{} Package '{}' not found in database or repositories.", apt_prefix("FAIL"), target);
                 return;
             }
         };
@@ -1513,6 +1667,26 @@ impl Core {
         println!("  {:<16} {}", c("Version:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), pkg.version);
         println!("  {:<16} [{}]", c("Format:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), pkg.format.to_uppercase());
         println!("  {:<16} {}", c("Status:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), c("Installed", &[Colors::BRIGHT_GREEN]));
+
+        if let Some(ref rname) = pkg.registry_name {
+            println!("  {:<16} [{}]", c("Registry:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rname);
+        }
+        if let Some(ref stype) = pkg.source_type {
+            println!("  {:<16} {}", c("Source Type:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), stype);
+        }
+        if let Some(ref recipe_id) = pkg.recipe_id {
+            println!("  {:<16} {}", c("Recipe ID:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), recipe_id);
+        }
+        if let Some(ref def_env) = pkg.default_env {
+            let env_str = def_env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(", ");
+            println!("  {:<16} {}", c("Default Env:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), env_str);
+        }
+        if let Some(ref def_args) = pkg.default_args {
+            println!("  {:<16} {}", c("Default Args:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), def_args.join(" "));
+        }
+        if pkg.bwrap == Some(true) {
+            println!("  {:<16} Bubblewrap (/opt isolated)", c("Sandbox:", &[Colors::BOLD, Colors::BRIGHT_CYAN]));
+        }
 
         if pkg.pinned {
             println!(
@@ -1559,7 +1733,7 @@ impl Core {
         }
 
         // Check shared library linkages
-        self.check_pkg_ldd(pkg);
+        self.check_pkg_ldd(&pkg);
         println!();
     }
 
@@ -1778,6 +1952,477 @@ impl Core {
             Ok(idx) if idx >= 1 && idx <= candidates.len() => candidates.get(idx - 1),
             _ => candidates.first(),
         }
+    }
+
+    pub async fn sync_databases(&self) -> Result<(), String> {
+        crate::registry::sync_registries(
+            &self.http_client,
+            &self.config.sources_list_file,
+            &self.config.registries_cache_dir,
+        )
+        .await
+    }
+
+    pub fn repo_manage(&self, cmd: crate::cli::RepoCommands) -> Result<(), String> {
+        match cmd {
+            crate::cli::RepoCommands::List => {
+                let sources = crate::registry::load_sources(&self.config.sources_list_file)?;
+                if sources.is_empty() {
+                    println!("{} No repositories configured in sources.list", apt_prefix("WARN"));
+                    return Ok(());
+                }
+
+                println!(
+                    "{} {}",
+                    c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                    c("Configured Package Repositories:", &[Colors::BOLD, Colors::BRIGHT_WHITE])
+                );
+
+                let headers = ["REPO ID", "STATUS", "URL", "PACKAGES", "LAST UPDATED"];
+                let mut rows = Vec::new();
+
+                for entry in sources {
+                    let status = if entry.enabled {
+                        c("enabled", &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                    } else {
+                        c("disabled", &[Colors::DIM, Colors::WHITE])
+                    };
+
+                    let (pkg_count, updated_at) = if let Some(idx) =
+                        crate::registry::get_cached_index(&self.config.registries_cache_dir, &entry.id)
+                    {
+                        (
+                            format!("{} packages", idx.packages.len()),
+                            idx.updated_at.unwrap_or_else(|| "unknown".to_string()),
+                        )
+                    } else {
+                        ("not cached".to_string(), "never".to_string())
+                    };
+
+                    rows.push(vec![
+                        c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                        status,
+                        entry.url,
+                        pkg_count,
+                        updated_at,
+                    ]);
+                }
+
+                print_table(&headers, &rows);
+                Ok(())
+            }
+            crate::cli::RepoCommands::Add { id, url } => {
+                crate::registry::add_repo(&self.config.sources_list_file, &id, &url)?;
+                println!(
+                    "{} Added repository '{}' ({}) to sources.list",
+                    apt_prefix("OK"),
+                    c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                    url
+                );
+                println!(
+                    "        Run {} to synchronize the package database.",
+                    c("appmgr update", &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+                );
+                Ok(())
+            }
+            crate::cli::RepoCommands::Remove { id } => {
+                crate::registry::remove_repo(
+                    &self.config.sources_list_file,
+                    &id,
+                    &self.config.registries_cache_dir,
+                )?;
+                println!(
+                    "{} Removed repository '{}' and purged cache.",
+                    apt_prefix("OK"),
+                    c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                );
+                Ok(())
+            }
+            crate::cli::RepoCommands::Enable { id } => {
+                crate::registry::set_repo_enabled(&self.config.sources_list_file, &id, true)?;
+                println!(
+                    "{} Enabled repository '{}'.",
+                    apt_prefix("OK"),
+                    c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                );
+                Ok(())
+            }
+            crate::cli::RepoCommands::Disable { id } => {
+                crate::registry::set_repo_enabled(&self.config.sources_list_file, &id, false)?;
+                println!(
+                    "{} Disabled repository '{}'.",
+                    apt_prefix("OK"),
+                    c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                );
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn pkg_manage(&self, cmd: crate::cli::PkgCommands) -> Result<(), String> {
+        match cmd {
+            crate::cli::PkgCommands::New { id, output } => {
+                let out_path = crate::registry::pkg_new(&id, output.as_deref().map(Path::new))?;
+                println!(
+                    "{} Created new package recipe template: {}",
+                    apt_prefix("OK"),
+                    c(&out_path.display().to_string(), &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                );
+                Ok(())
+            }
+            crate::cli::PkgCommands::Lint { file } => {
+                let path = Path::new(&file);
+                match crate::registry::pkg_lint(path) {
+                    Ok(r) => {
+                        println!(
+                            "{} Recipe '{}' ({}) is valid Schema v1.",
+                            apt_prefix("OK"),
+                            c(&r.package.name, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+                            r.package.id
+                        );
+                        Ok(())
+                    }
+                    Err(errs) => {
+                        for e in errs {
+                            println!("{} {}", apt_prefix("FAIL"), e);
+                        }
+                        Err("Recipe linting failed".to_string())
+                    }
+                }
+            }
+            crate::cli::PkgCommands::Test { file, dry_run } => {
+                crate::registry::pkg_test(&self.http_client, Path::new(&file), dry_run).await
+            }
+        }
+    }
+
+    pub async fn download_direct_url(
+        &self,
+        url: &str,
+        dest_path: &Path,
+        asset_name: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(parent) = dest_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let temp_dest = dest_path.with_extension("part");
+
+        let resp = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to initiate download from {}: {}", url, e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Download failed with HTTP {}", resp.status()));
+        }
+
+        let total_bytes = resp.content_length().unwrap_or(0);
+        let mut bar = crate::ui::PacmanBar::new(
+            100,
+            &format!("Downloading {}", &asset_name[..asset_name.len().min(20)]),
+            "%",
+        );
+
+        let mut file = fs::File::create(&temp_dest)
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        let mut downloaded: u64 = 0;
+        let mut hasher = sha2::Sha256::new();
+        let mut stream = resp.bytes_stream();
+
+        use futures_util::StreamExt;
+        use sha2::Digest;
+
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| format!("Error during download: {}", e))?;
+            file.write_all(&chunk)
+                .map_err(|e| format!("Write error: {}", e))?;
+            hasher.update(&chunk);
+            downloaded += chunk.len() as u64;
+
+            if let Some(pct) = (downloaded * 100).checked_div(total_bytes) {
+                bar.update(pct as usize, "");
+            }
+        }
+        bar.finish("Complete");
+
+        let calculated_hash = hex::encode(hasher.finalize());
+        if let Some(expected) = expected_sha256 {
+            let exp_clean = expected.trim().to_lowercase();
+            if !exp_clean.is_empty() && calculated_hash != exp_clean {
+                let _ = fs::remove_file(&temp_dest);
+                return Err(format!(
+                    "SHA-256 verification failed for {}.\nExpected: {}\nCalculated: {}",
+                    asset_name, exp_clean, calculated_hash
+                ));
+            }
+            println!(
+                "{} SHA-256 verified successfully ({})",
+                apt_prefix("OK"),
+                &calculated_hash[..8]
+            );
+        }
+
+        if fs::rename(&temp_dest, dest_path).is_err() {
+            fs::copy(&temp_dest, dest_path).map_err(|e| e.to_string())?;
+            let _ = fs::remove_file(&temp_dest);
+        }
+
+        Ok(())
+    }
+
+    pub async fn install_from_registry_package(
+        &mut self,
+        repo_name: &str,
+        pkg: &crate::registry::RegistryPackage,
+        force: bool,
+        assume_yes: bool,
+        prefer: Option<&str>,
+        include_pre: bool,
+    ) -> Result<bool, String> {
+        println!(
+            "{} Resolving package '{}' from repository [{}]...",
+            apt_prefix("INFO"),
+            c(&pkg.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+            c(repo_name, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+        );
+
+        let cache_download_dir = self.config.cache_dir.join("downloads");
+        let _ = fs::create_dir_all(&cache_download_dir);
+
+        let (downloaded_file, detected_version, source_type) = match pkg.source.source_type.as_str() {
+            "github" => {
+                let repo = pkg.source.repo.as_ref().ok_or_else(|| "Missing github repo in recipe".to_string())?;
+                let pre = include_pre || pkg.source.pre == Some(true);
+                let (status, release_opt, _, _) = self.github.get_release(repo, None, pre, None).await?;
+                if status == StatusCode::NOT_FOUND || release_opt.is_none() {
+                    return Err(format!("No release found on GitHub for {}", repo));
+                }
+                let release = release_opt.unwrap();
+
+                let effective_prefer = prefer.or(pkg.source.prefer.as_deref());
+                let candidates = self.github.filter_assets(
+                    &release.assets,
+                    effective_prefer,
+                    pkg.source.asset_regex.as_deref(),
+                    Some(&pkg.id),
+                );
+                let chosen = candidates.first().ok_or_else(|| {
+                    format!("No compatible release assets found for package '{}'", pkg.id)
+                })?;
+
+                let target_path = cache_download_dir.join(&chosen.name);
+                self.github
+                    .download_asset(
+                        &chosen.url,
+                        &target_path,
+                        chosen.size,
+                        &chosen.name,
+                        Some(chosen),
+                        Some(&release.assets),
+                    )
+                    .await?;
+
+                (target_path, release.tag_name, "github".to_string())
+            }
+            "redirect" => {
+                let url = pkg.source.url.as_ref().ok_or_else(|| "Missing redirect url in recipe".to_string())?;
+                let no_redirect_client = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .user_agent("appmgr")
+                    .build()
+                    .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+                let head_resp = no_redirect_client
+                    .head(url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to resolve redirect header from {}: {}", url, e))?;
+
+                let resolved_url = if head_resp.status().is_redirection() {
+                    let loc = head_resp
+                        .headers()
+                        .get("location")
+                        .and_then(|v| v.to_str().ok())
+                        .ok_or_else(|| "Redirect missing Location header".to_string())?;
+                    if loc.starts_with("http://") || loc.starts_with("https://") {
+                        loc.to_string()
+                    } else {
+                        let base = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+                        base.join(loc).map_err(|e| e.to_string())?.to_string()
+                    }
+                } else {
+                    url.to_string()
+                };
+
+                let url_path = reqwest::Url::parse(&resolved_url).map(|u| u.path().to_string()).unwrap_or_default();
+                let raw_filename = url_path.split('/').next_back().unwrap_or(&pkg.id);
+                let filename = if raw_filename.is_empty() || !raw_filename.contains('.') {
+                    format!("{}.{}", pkg.id, pkg.format)
+                } else {
+                    raw_filename.to_string()
+                };
+
+                let version = if let Some(ref v_regex) = pkg.source.version_regex {
+                    if let Ok(re) = regex::Regex::new(v_regex) {
+                        re.captures(&resolved_url)
+                            .or_else(|| re.captures(&filename))
+                            .and_then(|c| c.get(1))
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_else(|| "latest".to_string())
+                    } else {
+                        "latest".to_string()
+                    }
+                } else {
+                    "latest".to_string()
+                };
+
+                let target_path = cache_download_dir.join(&filename);
+                self.download_direct_url(&resolved_url, &target_path, &filename, None).await?;
+
+                (target_path, version, "redirect".to_string())
+            }
+            "direct" => {
+                let arch = std::env::consts::ARCH;
+                let direct_url = if arch == "x86_64" {
+                    pkg.source.x86_64.as_ref().ok_or_else(|| "x86_64 direct URL not specified in recipe".to_string())?
+                } else if arch == "aarch64" {
+                    pkg.source.aarch64.as_ref().ok_or_else(|| "aarch64 direct URL not available for this package".to_string())?
+                } else {
+                    return Err(format!("Unsupported architecture: {}", arch));
+                };
+
+                let url_path = reqwest::Url::parse(direct_url).map(|u| u.path().to_string()).unwrap_or_default();
+                let raw_filename = url_path.split('/').next_back().unwrap_or(&pkg.id);
+                let filename = if raw_filename.is_empty() || !raw_filename.contains('.') {
+                    format!("{}.{}", pkg.id, pkg.format)
+                } else {
+                    raw_filename.to_string()
+                };
+
+                let mut expected_sha256 = None;
+                if let Some(ref sha_url) = pkg.source.sha256_url {
+                    if let Ok(resp) = self.http_client.get(sha_url).send().await {
+                        if let Ok(body) = resp.text().await {
+                            let first_word = body.split_whitespace().next().unwrap_or("").to_string();
+                            if first_word.len() == 64 {
+                                expected_sha256 = Some(first_word);
+                            }
+                        }
+                    }
+                }
+
+                let version = if let Some(ref v_url) = pkg.source.version_url {
+                    if let Ok(resp) = self.http_client.get(v_url).send().await {
+                        if let Ok(body) = resp.text().await {
+                            body.trim().to_string()
+                        } else {
+                            "latest".to_string()
+                        }
+                    } else {
+                        "latest".to_string()
+                    }
+                } else {
+                    "latest".to_string()
+                };
+
+                let target_path = cache_download_dir.join(&filename);
+                self.download_direct_url(direct_url, &target_path, &filename, expected_sha256.as_deref()).await?;
+
+                (target_path, version, "direct".to_string())
+            }
+            "gitlab" => {
+                let instance = pkg.source.instance.as_deref().unwrap_or("https://gitlab.com");
+                let project = pkg.source.project.as_ref().ok_or_else(|| "Missing gitlab project in recipe".to_string())?;
+                let encoded_proj = project.replace('/', "%2F");
+                let api_url = format!("{}/api/v4/projects/{}/releases", instance, encoded_proj);
+
+                let resp = self.http_client.get(&api_url).send().await
+                    .map_err(|e| format!("Failed to query GitLab API: {}", e))?;
+                if !resp.status().is_success() {
+                    return Err(format!("GitLab API returned HTTP {} for {}", resp.status(), project));
+                }
+
+                let releases: serde_json::Value = resp.json().await
+                    .map_err(|e| format!("Failed to parse GitLab JSON: {}", e))?;
+                let first_rel = releases.as_array().and_then(|a| a.first())
+                    .ok_or_else(|| "No releases found on GitLab".to_string())?;
+
+                let tag = first_rel["tag_name"].as_str().unwrap_or("latest").to_string();
+                let assets_obj = &first_rel["assets"]["links"];
+                let links = assets_obj.as_array().ok_or_else(|| "No asset links in GitLab release".to_string())?;
+
+                let mut matched_link = None;
+                for link in links {
+                    let name = link["name"].as_str().unwrap_or("");
+                    let url = link["url"].as_str().unwrap_or("");
+                    if let Some(ref re_str) = pkg.source.asset_regex {
+                        if let Ok(re) = regex::Regex::new(re_str) {
+                            if re.is_match(name) || re.is_match(url) {
+                                matched_link = Some((name.to_string(), url.to_string()));
+                                break;
+                            }
+                        }
+                    } else if name.contains("linux") || name.contains("x86_64") || name.ends_with(".AppImage") || name.ends_with(".deb") {
+                        matched_link = Some((name.to_string(), url.to_string()));
+                        break;
+                    }
+                }
+
+                let (asset_name, asset_url) = matched_link
+                    .ok_or_else(|| "No compatible asset link found in GitLab release".to_string())?;
+
+                let target_path = cache_download_dir.join(&asset_name);
+                self.download_direct_url(&asset_url, &target_path, &asset_name, None).await?;
+
+                (target_path, tag, "gitlab".to_string())
+            }
+            other => return Err(format!("Unsupported recipe source type: '{}'", other)),
+        };
+
+        let env_map = pkg.runtime.as_ref().and_then(|r| r.default_env.clone());
+        let args_vec = pkg.runtime.as_ref().and_then(|r| r.default_args.clone());
+        let clean_bin = pkg.bin_name.clone().or_else(|| Some(crate::registry::clean_binary_name(&pkg.id, &pkg.id)));
+
+        let installed = self.install_local_file(
+            &downloaded_file,
+            force,
+            assume_yes,
+            pkg.source.repo.clone(),
+            Some(detected_version),
+            None,
+            None,
+            env_map,
+            args_vec,
+            false,
+            clean_bin,
+        )?;
+
+        if installed {
+            if let Some(record) = self.db.get_mut(&pkg.id) {
+                record.name = pkg.name.clone();
+                record.source_type = Some(source_type);
+                record.recipe_id = Some(pkg.id.clone());
+                record.registry_name = Some(repo_name.to_string());
+                record.description = Some(pkg.description.clone());
+                if let Some(gui) = pkg.gui {
+                    record.is_gui = Some(gui);
+                }
+                if let Some(ref r) = pkg.runtime {
+                    record.default_env = r.default_env.clone();
+                    record.default_args = r.default_args.clone();
+                }
+                if let Some(ref s) = pkg.sandbox {
+                    record.bwrap = s.bwrap;
+                    record.bind_opt = s.bind_opt.clone();
+                }
+                let _ = self.db.save();
+            }
+        }
+
+        Ok(installed)
     }
 }
 

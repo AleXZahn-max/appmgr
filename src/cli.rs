@@ -65,11 +65,32 @@ pub enum Commands {
     #[command(
         alias = "s",
         alias = "find",
-        about = "Search GitHub repositories for applications"
+        about = "Search package registries and GitHub for applications"
     )]
     Search {
         #[arg(help = "Application name or search query")]
         query: String,
+
+        #[arg(long = "offline", help = "Search only local repository cache")]
+        offline: bool,
+    },
+
+    #[command(
+        alias = "sync",
+        about = "Synchronize package databases from configured repositories"
+    )]
+    Update,
+
+    #[command(about = "Manage package repositories in sources.list")]
+    Repo {
+        #[command(subcommand)]
+        command: RepoCommands,
+    },
+
+    #[command(about = "Maintainer tools for recipe creation, linting, and testing")]
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommands,
     },
 
     #[command(about = "Link an installed application to a GitHub repository for updates")]
@@ -83,8 +104,7 @@ pub enum Commands {
 
     #[command(
         alias = "up",
-        alias = "update",
-        about = "Check and upgrade packages from GitHub Releases"
+        about = "Check and upgrade packages from GitHub Releases and registries"
     )]
     Upgrade {
         #[arg(help = "Specific application to upgrade (optional)")]
@@ -225,6 +245,7 @@ pub enum Commands {
     #[command(about = "Refresh desktop database and icon theme caches")]
     UpdateDb,
 
+    #[cfg(feature = "self-update")]
     #[command(name = "self-update", about = "Update appmgr itself to the latest version")]
     SelfUpdate {
         #[arg(short = 'c', long = "check", help = "Check for available appmgr updates without installing")]
@@ -241,6 +262,57 @@ pub enum Commands {
     Completions {
         #[arg(value_enum, help = "Shell to generate completions for")]
         shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RepoCommands {
+    #[command(about = "List configured repositories in sources.list")]
+    List,
+    #[command(about = "Add a repository to sources.list")]
+    Add {
+        #[arg(help = "Repository identifier (e.g. core, community)")]
+        id: String,
+        #[arg(help = "Repository index URL or local file path")]
+        url: String,
+    },
+    #[command(about = "Remove a repository from sources.list and delete its cache")]
+    Remove {
+        #[arg(help = "Repository identifier to remove")]
+        id: String,
+    },
+    #[command(about = "Enable a previously disabled repository")]
+    Enable {
+        #[arg(help = "Repository identifier to enable")]
+        id: String,
+    },
+    #[command(about = "Disable a repository without deleting its configuration")]
+    Disable {
+        #[arg(help = "Repository identifier to disable")]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PkgCommands {
+    #[command(about = "Generate a new Schema v1 package recipe template")]
+    New {
+        #[arg(help = "Package ID for the new recipe")]
+        id: String,
+        #[arg(short = 'o', long = "output", help = "Destination TOML file path")]
+        output: Option<String>,
+    },
+    #[command(about = "Lint and validate a TOML package recipe against Schema v1")]
+    Lint {
+        #[arg(help = "Path to TOML recipe file")]
+        file: String,
+    },
+    #[command(about = "Test source resolution and URL reachability for a recipe")]
+    Test {
+        #[arg(help = "Path to TOML recipe file")]
+        file: String,
+        #[arg(long = "dry-run", help = "Emulate checks without modifying system")]
+        dry_run: bool,
     },
 }
 

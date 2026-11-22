@@ -1,6 +1,6 @@
 # Maintainer: Alex Zahn
 pkgname=appmgr
-pkgver=2.0.1
+pkgver=2.1.0
 pkgrel=1
 pkgdesc="Universal Linux Application Combine (.deb, .AppImage, .tar.*, .zip, Standalone ELF)"
 arch=('x86_64' 'aarch64')
@@ -19,7 +19,7 @@ source=()
 build() {
     cd "$startdir"
     unset CFLAGS CXXFLAGS LDFLAGS RUSTFLAGS
-    cargo build --release --locked
+    cargo build --release --locked --no-default-features
 }
 
 package() {

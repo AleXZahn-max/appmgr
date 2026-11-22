@@ -204,6 +204,7 @@ Categories=Utility;Application;
             env: env_map,
             args: args_vec,
             pinned: false,
+            ..Default::default()
         })
     }
 

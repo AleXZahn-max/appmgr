@@ -22,6 +22,9 @@ pub struct Config {
     pub db_file: PathBuf,
     pub backups_dir: PathBuf,
     pub cache_dir: PathBuf,
+    pub config_dir: PathBuf,
+    pub sources_list_file: PathBuf,
+    pub registries_cache_dir: PathBuf,
 }
 
 impl Config {
@@ -46,6 +49,8 @@ impl Config {
 
         if mode == "system" {
             let db_dir = PathBuf::from("/var/lib/appmgr");
+            let config_dir = PathBuf::from("/etc/appmgr");
+            let registries_cache_dir = PathBuf::from("/var/cache/appmgr/registries");
             Ok(Self {
                 mode,
                 prefix: PathBuf::from("/usr/local"),
@@ -57,10 +62,15 @@ impl Config {
                 backups_dir: db_dir.join("backups"),
                 cache_dir: db_dir.join("cache"),
                 db_dir,
+                sources_list_file: config_dir.join("sources.list"),
+                config_dir,
+                registries_cache_dir,
             })
         } else {
             let prefix = home.join(".local");
             let db_dir = prefix.join("share/appmgr");
+            let config_dir = home.join(".config/appmgr");
+            let registries_cache_dir = home.join(".cache/appmgr/registries");
             Ok(Self {
                 mode,
                 apps_dir: db_dir.join("apps"),
@@ -72,6 +82,9 @@ impl Config {
                 cache_dir: db_dir.join("cache"),
                 db_dir,
                 prefix,
+                sources_list_file: config_dir.join("sources.list"),
+                config_dir,
+                registries_cache_dir,
             })
         }
     }
@@ -85,6 +98,8 @@ impl Config {
             &self.db_dir,
             &self.backups_dir,
             &self.cache_dir,
+            &self.config_dir,
+            &self.registries_cache_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }

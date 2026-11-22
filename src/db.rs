@@ -49,6 +49,56 @@ pub struct PackageRecord {
     pub args: Vec<String>,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub source_type: Option<String>,
+    #[serde(default)]
+    pub recipe_id: Option<String>,
+    #[serde(default)]
+    pub registry_name: Option<String>,
+    #[serde(default)]
+    pub default_env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub default_args: Option<Vec<String>>,
+    #[serde(default)]
+    pub bwrap: Option<bool>,
+    #[serde(default)]
+    pub bind_opt: Option<Vec<String>>,
+}
+
+impl Default for PackageRecord {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            version: String::new(),
+            format: String::new(),
+            mode: default_user(),
+            install_date: String::new(),
+            install_dir: PathBuf::new(),
+            source_file: None,
+            binaries: Vec::new(),
+            desktop_files: Vec::new(),
+            icons: Vec::new(),
+            installed_files_count: None,
+            total_size_bytes: None,
+            is_gui: None,
+            description: None,
+            repo: None,
+            tag: None,
+            etag: None,
+            asset_pattern: None,
+            env: HashMap::new(),
+            args: Vec::new(),
+            pinned: false,
+            source_type: None,
+            recipe_id: None,
+            registry_name: None,
+            default_env: None,
+            default_args: None,
+            bwrap: None,
+            bind_opt: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -272,5 +322,12 @@ mod tests {
         assert_eq!(btop.env.get("FOO").unwrap(), "bar");
         assert_eq!(btop.args, vec!["--utf-force", "--low-color"]);
         assert!(!btop.pinned);
+        assert_eq!(btop.source_type, None);
+        assert_eq!(btop.recipe_id, None);
+        assert_eq!(btop.registry_name, None);
+        assert_eq!(btop.default_env, None);
+        assert_eq!(btop.default_args, None);
+        assert_eq!(btop.bwrap, None);
+        assert_eq!(btop.bind_opt, None);
     }
 }

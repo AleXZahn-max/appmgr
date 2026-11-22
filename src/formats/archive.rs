@@ -309,6 +309,7 @@ exec "$APP_ROOT/{rel_bin}" "${{PERSISTENT_ARGS[@]}}" "$@"
             env: env_map,
             args: args_vec,
             pinned: false,
+            ..Default::default()
         })
     }
 

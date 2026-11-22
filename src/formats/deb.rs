@@ -251,6 +251,7 @@ impl DebPackage {
             env: env_map,
             args: args_vec,
             pinned: false,
+            ..Default::default()
         })
     }
 

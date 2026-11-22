@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.0.1-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.0.1 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.1.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
 │  Reading package lists... Done                                                         │
@@ -175,16 +175,64 @@ makepkg -si
 
 ## Command Reference & Examples
 
-### 1. Searching Applications (`search`)
-Search GitHub for software repositories interactively with star counts and descriptions:
+### 1. Synchronizing Package Repositories (`update`, `sync`)
+Synchronizes all active package registries configured in `~/.config/appmgr/sources.list` using ETag caching:
 ```bash
-# Search by keyword:
-appmgr search btop
-appmgr search "terminal file manager"
+appmgr update
+# or:
+appmgr sync
 ```
 
-### 2. Installing Applications (`install`)
+### 2. Managing Package Repositories (`repo`)
+Manage third-party and custom package sources:
 ```bash
+# List configured repositories:
+appmgr repo list
+
+# Add a new repository:
+appmgr repo add community https://example.com/appmgr-community/index.json
+
+# Temporarily disable or enable a repository:
+appmgr repo disable community
+appmgr repo enable community
+
+# Remove a repository and purge its cache:
+appmgr repo remove community
+```
+
+### 3. Maintainer Recipe Tools (`pkg`)
+Create, lint, and test Schema v1 declarative package recipes:
+```bash
+# Generate a new recipe template:
+appmgr pkg new myapp -o myapp.toml
+
+# Lint and validate recipe syntax and constraints:
+appmgr pkg lint myapp.toml
+
+# Test upstream source resolution and asset downloads (dry run):
+appmgr pkg test myapp.toml --dry-run
+```
+
+### 4. Searching Applications (`search`)
+Search local repositories and GitHub for software:
+```bash
+# Search repositories and GitHub:
+appmgr search btop
+
+# Search only local cached repositories (offline):
+appmgr search ripgrep --offline
+```
+
+### 5. Installing Applications (`install`)
+Install packages from declarative recipes, repositories, GitHub, or local files:
+```bash
+# Install directly from official package registry:
+appmgr install discord
+appmgr install jq
+
+# Install directly from a local Schema v1 recipe file:
+appmgr install ./discord.toml
+
 # Interactive GitHub repository search and install by name:
 appmgr install btop
 
@@ -210,7 +258,7 @@ appmgr install ~/Downloads/tool.zip
 appmgr install btop -y
 ```
 
-### 3. Linking Applications to GitHub (`link`)
+### 6. Linking Applications to GitHub (`link`)
 Link an already installed application (e.g. installed from a local file) to a GitHub repository to enable automatic update checking:
 ```bash
 # Link application to GitHub repo:

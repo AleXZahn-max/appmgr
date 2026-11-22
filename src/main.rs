@@ -6,7 +6,9 @@ mod desktop;
 mod doctor;
 mod formats;
 mod github;
+mod registry;
 mod sandbox;
+#[cfg(feature = "self-update")]
 mod self_update;
 mod ui;
 
@@ -15,12 +17,21 @@ use cli::{Cli, Commands};
 use config::Config;
 use core::Core;
 use doctor::Doctor;
+#[cfg(feature = "self-update")]
 use self_update::SelfUpdater;
 use std::io;
 use ui::print_banner;
 
 #[tokio::main]
 async fn main() {
+    // Global signal handler for graceful Ctrl+C cancellation
+    tokio::spawn(async {
+        let _ = tokio::signal::ctrl_c().await;
+        ui::restore_cursor();
+        eprintln!("\n{} Operation interrupted by user.", ui::apt_prefix("WARN"));
+        std::process::exit(130);
+    });
+
     let args = Cli::parse();
 
     let cmd = match args.command {
@@ -71,7 +82,10 @@ async fn main() {
             .await
             .map(|_| ())
         }
-        Commands::Search { query } => core.search(&query).await,
+        Commands::Search { query, offline } => core.search(&query, offline).await,
+        Commands::Update => core.sync_databases().await,
+        Commands::Repo { command } => core.repo_manage(command),
+        Commands::Pkg { command } => core.pkg_manage(command).await,
         Commands::Link { app, repo } => core.link(&app, &repo).await.map(|_| ()),
         Commands::Upgrade {
             app,
@@ -143,6 +157,7 @@ async fn main() {
             desktop::run_system_triggers(&config.applications_dir, &config.icons_dir);
             Ok(())
         }
+        #[cfg(feature = "self-update")]
         Commands::SelfUpdate { check, pre, yes } => {
             let updater = SelfUpdater::new();
             updater

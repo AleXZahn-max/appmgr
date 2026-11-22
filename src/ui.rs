@@ -293,6 +293,11 @@ pub fn print_banner() {
     );
 }
 
+pub fn restore_cursor() {
+    print!("\x1b[?25h");
+    let _ = io::stdout().flush();
+}
+
 pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
     let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
 
@@ -306,12 +311,38 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
         }
     }
 
+    let max_cols = terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(80);
+
+    let total_spacing = if widths.is_empty() { 0 } else { (widths.len() - 1) * 3 + 4 };
+    let total_width: usize = widths.iter().sum::<usize>() + total_spacing;
+
+    if total_width > max_cols && !widths.is_empty() {
+        let overflow = total_width - max_cols;
+        if let Some((max_idx, max_w)) = widths.iter().copied().enumerate().max_by_key(|(_, w)| *w) {
+            if max_w > overflow + 15 {
+                widths[max_idx] = max_w - overflow;
+            } else if max_w > 20 {
+                widths[max_idx] = 20;
+            }
+        }
+    }
+
     let header_line: Vec<String> = headers
         .iter()
         .enumerate()
         .map(|(i, h)| {
-            let pad = widths[i].saturating_sub(h.len());
-            format!("{}{}", c(h, &[Colors::BOLD, Colors::BRIGHT_WHITE]), " ".repeat(pad))
+            let col_limit = *widths.get(i).unwrap_or(&h.len());
+            let clean_h = if h.len() > col_limit {
+                let mut t: String = h.chars().take(col_limit.saturating_sub(3)).collect();
+                t.push_str("...");
+                t
+            } else {
+                h.to_string()
+            };
+            let pad = col_limit.saturating_sub(clean_h.len());
+            format!("{}{}", c(&clean_h, &[Colors::BOLD, Colors::BRIGHT_WHITE]), " ".repeat(pad))
         })
         .collect();
     println!("  {}", header_line.join("   "));
@@ -324,9 +355,19 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
             .iter()
             .enumerate()
             .map(|(i, cell)| {
-                let cell_len = strip_ansi(cell).chars().count();
-                let pad = widths.get(i).unwrap_or(&0).saturating_sub(cell_len);
-                format!("{}{}", cell, " ".repeat(pad))
+                let clean_str = strip_ansi(cell);
+                let cell_len = clean_str.chars().count();
+                let col_limit = *widths.get(i).unwrap_or(&cell_len);
+                let display_cell = if cell_len > col_limit {
+                    let mut truncated: String = clean_str.chars().take(col_limit.saturating_sub(3)).collect();
+                    truncated.push_str("...");
+                    truncated
+                } else {
+                    cell.clone()
+                };
+                let actual_len = strip_ansi(&display_cell).chars().count();
+                let pad = col_limit.saturating_sub(actual_len);
+                format!("{}{}", display_cell, " ".repeat(pad))
             })
             .collect();
         println!("  {}", row_line.join("   "));

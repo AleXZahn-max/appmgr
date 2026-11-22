@@ -196,6 +196,7 @@ exec "$APP_ROOT/bin/{pkg_id}" "${{PERSISTENT_ARGS[@]}}" "$@"
             env: env_map,
             args: args_vec,
             pinned: false,
+            ..Default::default()
         })
     }
 }
