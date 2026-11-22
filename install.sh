@@ -1,49 +1,56 @@
 #!/usr/bin/env bash
-# Quick installer for appmgr
+# Fast user installer for appmgr (Rust edition)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_BIN="$HOME/.local/bin"
-TARGET_SHARE="$HOME/.local/share/appmgr"
 
-echo -e "\033[1;36m::\033[0m \033[1;37mInstalling appmgr to user environment (~/.local)...\033[0m"
+echo -e "\033[1;36m::\033[0m \033[1;37mBuilding and installing appmgr v2.0.0 (Rust)...\033[0m"
+
+# Ensure Rust/Cargo is available
+if ! command -v cargo &>/dev/null; then
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck source=/dev/null
+        source "$HOME/.cargo/env"
+    else
+        echo -e "\033[1;31m[ FAIL ]\033[0m Cargo/Rust is not found in PATH or ~/.cargo/env."
+        echo "        Please install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        exit 1
+    fi
+fi
+
+cd "$SCRIPT_DIR"
+cargo build --release --locked
 
 mkdir -p "$TARGET_BIN"
-mkdir -p "$TARGET_SHARE/appmgr"
 mkdir -p "$HOME/.local/share/bash-completion/completions"
 mkdir -p "$HOME/.local/share/zsh/site-functions"
 mkdir -p "$HOME/.local/share/fish/vendor_completions.d"
 mkdir -p "$HOME/.local/share/man/man1"
 
-# Copy python code
-cp -r "$SCRIPT_DIR/appmgr/"* "$TARGET_SHARE/appmgr/"
+install -m 755 target/release/appmgr "$TARGET_BIN/appmgr"
 
-# Create executable in ~/.local/bin
-cat << 'EOF' > "$TARGET_BIN/appmgr"
-#!/usr/bin/env python3
-import sys
-from pathlib import Path
+# Generate and install completions directly from the compiled binary
+target/release/appmgr completions bash > "$HOME/.local/share/bash-completion/completions/appmgr" 2>/dev/null || true
+target/release/appmgr completions zsh > "$HOME/.local/share/zsh/site-functions/_appmgr" 2>/dev/null || true
+target/release/appmgr completions fish > "$HOME/.local/share/fish/vendor_completions.d/appmgr.fish" 2>/dev/null || true
 
-share_dir = Path.home() / ".local/share/appmgr"
-if str(share_dir) not in sys.path:
-    sys.path.insert(0, str(share_dir))
+if [ -f "$SCRIPT_DIR/man/man1/appmgr.1" ]; then
+    cp "$SCRIPT_DIR/man/man1/appmgr.1" "$HOME/.local/share/man/man1/appmgr.1" 2>/dev/null || true
+fi
 
-from appmgr.cli import main
+# Ensure ~/.local/bin is in PATH without duplicates
+BIN_DIR="$HOME/.local/bin"
+for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [ -f "$RC" ]; then
+        if ! grep -q 'PATH=.*\.local/bin' "$RC" 2>/dev/null; then
+            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$RC"
+        fi
+    fi
+done
 
-if __name__ == "__main__":
-    main()
-EOF
-
-chmod +x "$TARGET_BIN/appmgr"
-
-# Install completions
-cp "$SCRIPT_DIR/completions/bash/appmgr" "$HOME/.local/share/bash-completion/completions/appmgr" 2>/dev/null || true
-cp "$SCRIPT_DIR/completions/zsh/_appmgr" "$HOME/.local/share/zsh/site-functions/_appmgr" 2>/dev/null || true
-cp "$SCRIPT_DIR/completions/fish/appmgr.fish" "$HOME/.local/share/fish/vendor_completions.d/appmgr.fish" 2>/dev/null || true
-cp "$SCRIPT_DIR/man/man1/appmgr.1" "$HOME/.local/share/man/man1/appmgr.1" 2>/dev/null || true
-
-echo -e "\033[1;32m[  OK  ]\033[0m appmgr binary installed to: \033[1;33m$TARGET_BIN/appmgr\033[0m"
-echo -e "\033[1;32m[  OK  ]\033[0m Shell completions and man pages configured."
+echo -e "\033[1;32m[  OK  ]\033[0m appmgr v2.0.0 binary installed to: \033[1;33m$TARGET_BIN/appmgr\033[0m"
+echo -e "\033[1;32m[  OK  ]\033[0m Shell completions (bash, zsh, fish) generated and installed."
 echo
 echo -e "\033[1;36m::\033[0m Test the installation with: \033[1;32mappmgr --version\033[0m or \033[1;32mappmgr doctor\033[0m"

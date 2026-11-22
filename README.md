@@ -2,20 +2,20 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.4.0--beta-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
 [![Discord](https://img.shields.io/badge/Discord-AleXZahn__-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
 [![Built With](https://img.shields.io/badge/Built%20With-Antigravity%20(Neon%20xHigh)-9B51E0?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr)
 
-**The next-generation Pacman + APT hybrid engine for universal Linux application management.**
+**The next-generation Pacman + APT hybrid engine for universal Linux application management, built in blazingly fast Rust.**
 
 </div>
 
 ```text
-┌─── appmgr v1.4.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.0.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
 │  Reading package lists... Done                                                         │
@@ -41,8 +41,8 @@
 
 <a id="project-status"></a>
 > [!IMPORTANT]
-> ### Project Status: Active Beta Development
-> **AppMgr** is currently under active development. Features are rapidly evolving, and new capabilities are being continuously added.
+> ### Project Status: Active Development
+> **AppMgr v2.0.0** is rewritten entirely in Rust for maximum speed, memory safety, and sub-millisecond cold start times.
 > * If you encounter bugs, regressions, or have feature requests, please report them directly via **Discord**: `AleXZahn_`.
 
 > [!NOTE]
@@ -64,34 +64,37 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 
 ## Key Strengths & Architecture
 
-1. **Zero System Package Manager Conflicts**:
+1. **Pure Rust Performance & Instant Startup**:
+   Compiled to a single standalone binary with zero runtime dependencies. Sub-millisecond cold start and instant CLI responsiveness.
+
+2. **Zero System Package Manager Conflicts**:
    Applications reside in dedicated rootless directories (`~/.local/share/appmgr/apps/<name>/` or `/opt/appmgr/apps/<name>/` in system mode). Your base system package database remains untouched and pristine.
 
-2. **Transparent `/opt/` Virtualization via Bubblewrap (`bwrap`)**:
+3. **Transparent `/opt/` Virtualization via Bubblewrap (`bwrap`)**:
    Heavier proprietary `.deb` packages (e.g., Discord, VS Code, Google Chrome) often hardcode absolute file paths to `/opt/appname/` or `/usr/share/`. AppMgr automatically generates a sandbox wrapper that mounts those directories into an unprivileged user namespace, allowing complex binaries to run out of the box without root privileges.
 
-3. **Smart CLI vs GUI Desktop Integration**:
-   AppMgr inspects binaries for GUI toolkit linkages (`libX11`, `libwayland`, `libgtk`, `libQt`, `libSDL`, `libGL`).
+4. **Smart CLI vs GUI Desktop Integration**:
+   AppMgr inspects binaries with `goblin` for GUI toolkit linkages (`libX11`, `libwayland`, `libgtk`, `libQt`, `libSDL`, `libGL`).
    * **CLI tools** (e.g., `btop`, `ripgrep`, `jq`, `kubectl`): Only creates a launcher in your `PATH` (`~/.local/bin`), avoiding clutter in desktop app menus.
    * **GUI apps**: Automatically extracts icons into `hicolor` themes, crafts compliant `.desktop` entries, and refreshes the desktop database.
 
-4. **Public GitHub API with Zero Required Keys & ETag Caching**:
+5. **Public GitHub API with Zero Required Keys & ETag Caching**:
    AppMgr operates out of the box using GitHub's public API without requiring any registration or tokens. It leverages `ETag` and `If-None-Match` caching: when checking for updates, HTTP `304 Not Modified` responses consume zero GitHub API rate limits. (An optional `GITHUB_TOKEN` can be supplied to raise limits to 5,000 req/hr).
 
-5. **Multi-Threaded Concurrent Upgrade Checks**:
-   Check dozens of installed applications concurrently in seconds via Python's `ThreadPoolExecutor`, outputting synchronized real-time progress.
+6. **Multi-Threaded Async Upgrade Checks**:
+   Check dozens of installed applications concurrently in parallel with `tokio` (bounded to 8 tasks), outputting synchronized real-time progress.
 
-6. **SHA-256 Integrity Verification**:
+7. **SHA-256 Integrity Verification**:
    Automatically detects and downloads checksum files (`sha256sum.txt`, `SHA256SUMS`, `checksums.txt`, `*.sha256`) or asset digest hashes, validating downloaded archives before execution.
 
-7. **Persistent Environment Variables & Launch Flags**:
+8. **Persistent Environment Variables & Launch Flags**:
    Assign custom environment variables and runtime flags (such as Ozone hints or toolkit backends) per application. AppMgr preserves these configurations across updates.
 
-8. **Atomic Upgrades & Rollback Cache**:
-   During upgrades, AppMgr automatically creates an archive backup of the prior working version. If an update fails, AppMgr rolls back instantly. You can also manually revert using `appmgr rollback <app>`.
+9. **Atomic Upgrades & Rollback Cache**:
+   During upgrades, AppMgr automatically creates a backup snapshot of the prior working version. If an update fails, AppMgr rolls back instantly. You can also manually revert using `appmgr rollback <app>`.
 
-9. **Machine-Readable JSON Mode & Automation**:
-   With `--json`, commands like `appmgr list --json` and `appmgr upgrade --check --json` output clean JSON for scripts, status bars, and automated setups. Manifest `export` and `import` allow reproducing entire app environments with one command.
+10. **Built-in Self-Updating (`self-update`)**:
+    Automatically checks and updates the `appmgr` binary itself from GitHub Releases, with built-in protection for system package managers (pacman).
 
 ---
 
@@ -99,43 +102,41 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 
 | Format | Type Badge | Description |
 | :--- | :---: | :--- |
-| **Debian Packages** | `[DEB]` | Extracts data archives (`.tar.xz`, `.tar.gz`, `.tar.zst`), parses control metadata, sets up dependencies and optional Bubblewrap containers. |
-| **AppImage** | `[APPIMAGE]` | Inspects embedded desktop metadata and icons, checks FUSE availability (`libfuse.so.2`), with automatic fallback to `--appimage-extract-and-run`. |
+| **Debian Packages** | `[DEB]` | Extracts data archives (`.tar.xz`, `.tar.gz`, `.tar.zst`) via native `ar`, parses control metadata, sets up dependencies and optional Bubblewrap containers. |
+| **AppImage** | `[APPIMAGE]` | Inspects embedded desktop metadata and icons without launching, checks FUSE availability (`libfuse.so.2`), with automatic fallback to `--appimage-extract-and-run`. |
 | **Binary Tarballs** | `[TAR]` | Supports `.tar.xz`, `.tar.zst`, `.tar.gz`, `.tgz`, `.tar.bz2`. Features Tar Slip protection, single-root directory auto-collapsing (`--strip-components=1`), and ELF binary discovery. |
-| **Zip Archives** | `[ZIP]` | Safe extraction via `zipfile` with Zip Slip defense, root collapsing, Unix permission restoration, and binary scoring. |
+| **Zip Archives** | `[ZIP]` | Safe extraction via `zip` with Zip Slip defense, root collapsing, Unix permission restoration, and binary scoring. |
 | **Standalone ELF** | `[BIN]` | Raw Linux executables without archive packaging (e.g., `yt-dlp_linux`, `jq-linux-amd64`). Verifies `\x7fELF` magic bytes, sets executable permissions, and wraps into `PATH`. |
 
 ---
 
-## System Requirements
-
-AppMgr relies exclusively on the **Python standard library** and standard Linux utilities. No third-party `pip` modules are required.
+## Requirements
 
 ### Core Dependencies
-* **Python**: 3.10 or higher
+* **bubblewrap (`bwrap`)**: Rootless `/opt` filesystem virtualization for proprietary `.deb` packages
 * **tar**: Standard archive extraction
-* **desktop-file-utils**: Updating desktop database triggers
+* **xz & zstd**: Decompressing `.tar.xz` and `.tar.zst` archives
+* **desktop-file-utils**: Desktop database indexing (`update-desktop-database`)
 
 ### Recommended Tools
-* **bubblewrap (`bwrap`)**: Rootless `/opt` filesystem virtualization for proprietary `.deb` packages
 * **fuse2 / libfuse2**: Native FUSE mounting for AppImages
-* **zstd / xz**: Decompressing `.tar.zst` and `.tar.xz` archives
+* **gtk-update-icon-cache**: Icon theme cache regeneration
 
 ### Quick Install Commands
 
 **Arch Linux / CachyOS:**
 ```bash
-sudo pacman -S python tar xz zstd desktop-file-utils bubblewrap fuse2
+sudo pacman -S bubblewrap tar xz zstd desktop-file-utils fuse2
 ```
 
 **Debian / Ubuntu:**
 ```bash
-sudo apt install python3 tar xz-utils zstd desktop-file-utils bubblewrap libfuse2
+sudo apt install bubblewrap tar xz-utils zstd desktop-file-utils libfuse2
 ```
 
 **Fedora:**
 ```bash
-sudo dnf install python3 tar xz zstd desktop-file-utils bubblewrap fuse
+sudo dnf install bubblewrap tar xz zstd desktop-file-utils fuse
 ```
 
 ---
@@ -143,7 +144,7 @@ sudo dnf install python3 tar xz zstd desktop-file-utils bubblewrap fuse
 ## Installation & Building
 
 ### Option 1: Fast User Installation (Recommended)
-Installs AppMgr into `~/.local/bin` and user data directories (no root/sudo required):
+Builds and installs AppMgr into `~/.local/bin` (no root/sudo required):
 ```bash
 git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr
@@ -217,7 +218,16 @@ appmgr link obsidian obsidianmd/obsidian-releases
 appmgr link discord discord/discord-linux
 ```
 
-### 4. Managing Environment Variables (`env`)
+### 4. Updating AppMgr Itself (`self-update`)
+```bash
+# Check if a new version of appmgr is available:
+appmgr self-update --check
+
+# Update appmgr binary in-place:
+appmgr self-update -y
+```
+
+### 5. Managing Environment Variables (`env`)
 ```bash
 # Set custom persistent environment variables:
 appmgr env obsidian ELECTRON_OZONE_PLATFORM_HINT=auto QT_QPA_PLATFORM=wayland
@@ -229,7 +239,7 @@ appmgr env obsidian --list
 appmgr env obsidian --unset QT_QPA_PLATFORM
 ```
 
-### 5. Persistent Launch Arguments (`args`)
+### 6. Persistent Launch Arguments (`args`)
 ```bash
 # Set permanent CLI flags passed to the binary on every start:
 appmgr args btop --utf-force --low-color
@@ -241,7 +251,7 @@ appmgr args btop --list
 appmgr args btop --clear
 ```
 
-### 6. Version Freezing (`pin` / `unpin`)
+### 7. Version Freezing (`pin` / `unpin`)
 ```bash
 # Freeze package version to skip during general upgrades:
 appmgr pin btop
@@ -256,12 +266,12 @@ appmgr upgrade btop --force
 appmgr unpin btop
 ```
 
-### 7. Checking & Upgrading Packages (`upgrade`)
+### 8. Checking & Upgrading Packages (`upgrade`)
 ```bash
-# Multi-threaded check for updates without installing:
+# Multi-threaded async check for updates without installing:
 appmgr upgrade --check
 
-# Machine-readable JSON output for scripts:
+# Machine-readable JSON output for status bars and scripts:
 appmgr upgrade --check --json
 
 # Upgrade all linked applications with atomic rollback backup:
@@ -271,7 +281,7 @@ appmgr upgrade -y
 appmgr upgrade gh
 ```
 
-### 8. Rollback & Cache Cleanup (`rollback` / `clean`)
+### 9. Rollback & Cache Cleanup (`rollback` / `clean`)
 ```bash
 # Restore previous version from rollback backup:
 appmgr rollback btop
@@ -280,7 +290,7 @@ appmgr rollback btop
 appmgr clean -y
 ```
 
-### 9. Exporting & Importing Application Manifests (`export` / `import`)
+### 10. Exporting & Importing Application Manifests (`export` / `import`)
 ```bash
 # Export all installed applications and configurations:
 appmgr export my-apps.json
@@ -289,7 +299,7 @@ appmgr export my-apps.json
 appmgr import my-apps.json -y
 ```
 
-### 10. System Diagnostics & Inspection (`doctor` / `info` / `run`)
+### 11. System Diagnostics & Inspection (`doctor` / `info` / `run`)
 ```bash
 # Run comprehensive diagnostic checks (FUSE, bwrap, libraries, PATH):
 appmgr doctor
@@ -301,7 +311,7 @@ appmgr info btop
 appmgr run btop
 ```
 
-### 11. Removing Applications (`remove`)
+### 12. Removing Applications (`remove`)
 ```bash
 appmgr remove btop -y
 ```

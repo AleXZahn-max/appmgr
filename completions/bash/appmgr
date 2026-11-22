@@ -1,102 +1,784 @@
-# Bash completion for appmgr
-
-_appmgr_completions()
-{
-    local cur prev words cword
-    _init_completion || return
-
-    local commands="install search remove list info doctor run update-db link upgrade env args pin unpin rollback clean export import"
-
-    if [[ $cword -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
-        return 0
+_appmgr() {
+    local i cur prev opts cmd
+    COMPREPLY=()
+    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+        cur="$2"
+    else
+        cur="${COMP_WORDS[COMP_CWORD]}"
     fi
+    prev="$3"
+    cmd=""
+    opts=""
 
-    local installed_apps=""
-    if [[ -f "$HOME/.local/share/appmgr/installed.json" ]]; then
-        installed_apps=$(grep -o '"id": "[^"]*"' "$HOME/.local/share/appmgr/installed.json" 2>/dev/null | cut -d'"' -f4)
-    fi
+    for i in "${COMP_WORDS[@]:0:COMP_CWORD}"
+    do
+        case "${cmd},${i}" in
+            ",$1")
+                cmd="appmgr"
+                ;;
+            appmgr,args)
+                cmd="appmgr__subcmd__args"
+                ;;
+            appmgr,clean)
+                cmd="appmgr__subcmd__clean"
+                ;;
+            appmgr,completions)
+                cmd="appmgr__subcmd__completions"
+                ;;
+            appmgr,doctor)
+                cmd="appmgr__subcmd__doctor"
+                ;;
+            appmgr,env)
+                cmd="appmgr__subcmd__env"
+                ;;
+            appmgr,export)
+                cmd="appmgr__subcmd__export"
+                ;;
+            appmgr,help)
+                cmd="appmgr__subcmd__help"
+                ;;
+            appmgr,import)
+                cmd="appmgr__subcmd__import"
+                ;;
+            appmgr,info)
+                cmd="appmgr__subcmd__info"
+                ;;
+            appmgr,install)
+                cmd="appmgr__subcmd__install"
+                ;;
+            appmgr,link)
+                cmd="appmgr__subcmd__link"
+                ;;
+            appmgr,list)
+                cmd="appmgr__subcmd__list"
+                ;;
+            appmgr,pin)
+                cmd="appmgr__subcmd__pin"
+                ;;
+            appmgr,remove)
+                cmd="appmgr__subcmd__remove"
+                ;;
+            appmgr,rollback)
+                cmd="appmgr__subcmd__rollback"
+                ;;
+            appmgr,run)
+                cmd="appmgr__subcmd__run"
+                ;;
+            appmgr,search)
+                cmd="appmgr__subcmd__search"
+                ;;
+            appmgr,self-update)
+                cmd="appmgr__subcmd__self__subcmd__update"
+                ;;
+            appmgr,unpin)
+                cmd="appmgr__subcmd__unpin"
+                ;;
+            appmgr,update-db)
+                cmd="appmgr__subcmd__update__subcmd__db"
+                ;;
+            appmgr,upgrade)
+                cmd="appmgr__subcmd__upgrade"
+                ;;
+            appmgr__subcmd__help,args)
+                cmd="appmgr__subcmd__help__subcmd__args"
+                ;;
+            appmgr__subcmd__help,clean)
+                cmd="appmgr__subcmd__help__subcmd__clean"
+                ;;
+            appmgr__subcmd__help,completions)
+                cmd="appmgr__subcmd__help__subcmd__completions"
+                ;;
+            appmgr__subcmd__help,doctor)
+                cmd="appmgr__subcmd__help__subcmd__doctor"
+                ;;
+            appmgr__subcmd__help,env)
+                cmd="appmgr__subcmd__help__subcmd__env"
+                ;;
+            appmgr__subcmd__help,export)
+                cmd="appmgr__subcmd__help__subcmd__export"
+                ;;
+            appmgr__subcmd__help,help)
+                cmd="appmgr__subcmd__help__subcmd__help"
+                ;;
+            appmgr__subcmd__help,import)
+                cmd="appmgr__subcmd__help__subcmd__import"
+                ;;
+            appmgr__subcmd__help,info)
+                cmd="appmgr__subcmd__help__subcmd__info"
+                ;;
+            appmgr__subcmd__help,install)
+                cmd="appmgr__subcmd__help__subcmd__install"
+                ;;
+            appmgr__subcmd__help,link)
+                cmd="appmgr__subcmd__help__subcmd__link"
+                ;;
+            appmgr__subcmd__help,list)
+                cmd="appmgr__subcmd__help__subcmd__list"
+                ;;
+            appmgr__subcmd__help,pin)
+                cmd="appmgr__subcmd__help__subcmd__pin"
+                ;;
+            appmgr__subcmd__help,remove)
+                cmd="appmgr__subcmd__help__subcmd__remove"
+                ;;
+            appmgr__subcmd__help,rollback)
+                cmd="appmgr__subcmd__help__subcmd__rollback"
+                ;;
+            appmgr__subcmd__help,run)
+                cmd="appmgr__subcmd__help__subcmd__run"
+                ;;
+            appmgr__subcmd__help,search)
+                cmd="appmgr__subcmd__help__subcmd__search"
+                ;;
+            appmgr__subcmd__help,self-update)
+                cmd="appmgr__subcmd__help__subcmd__self__subcmd__update"
+                ;;
+            appmgr__subcmd__help,unpin)
+                cmd="appmgr__subcmd__help__subcmd__unpin"
+                ;;
+            appmgr__subcmd__help,update-db)
+                cmd="appmgr__subcmd__help__subcmd__update__subcmd__db"
+                ;;
+            appmgr__subcmd__help,upgrade)
+                cmd="appmgr__subcmd__help__subcmd__upgrade"
+                ;;
+            *)
+                ;;
+        esac
+    done
 
-    case "${words[1]}" in
-        install|i|in)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--yes -y --force -f --user --system --repo --prefer --pre" -- "${cur}") )
-            elif [[ "${prev}" == "--prefer" ]]; then
-                COMPREPLY=( $(compgen -W "appimage deb tar zip bin" -- "${cur}") )
-            else
-                _filedir '@(deb|AppImage|appimage|tar.xz|tar.zst|tar.gz|tgz|tar.bz2|txz|tzst|tar|zip)'
+    case "${cmd}" in
+        appmgr)
+            opts="-y -h -V --yes --system --user --help --version install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        link)
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+        appmgr__subcmd__args)
+            opts="-y -h --clear --list --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        upgrade|up|update)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--check -c --yes -y --force -f --prefer --pre --json --user --system" -- "${cur}") )
-            elif [[ "${prev}" == "--prefer" ]]; then
-                COMPREPLY=( $(compgen -W "appimage deb tar zip bin" -- "${cur}") )
-            else
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+        appmgr__subcmd__clean)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        remove|rm|uninstall|purge)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
-            else
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+        appmgr__subcmd__completions)
+            opts="-y -h --yes --system --user --help bash elvish fish powershell zsh"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        list|ls)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--type -t --json" -- "${cur}") )
-            elif [[ "${prev}" == "--type" || "${prev}" == "-t" ]]; then
-                COMPREPLY=( $(compgen -W "deb appimage tar zip bin" -- "${cur}") )
+        appmgr__subcmd__doctor)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        env)
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
-            elif [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--unset --list -l" -- "${cur}") )
+        appmgr__subcmd__env)
+            opts="-y -h --unset --list --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                --unset)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        args)
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
-            elif [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--clear --list -l" -- "${cur}") )
+        appmgr__subcmd__export)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        pin|unpin|rollback)
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
-            elif [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+        appmgr__subcmd__help)
+            opts="install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        clean)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+        appmgr__subcmd__help__subcmd__args)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        export)
-            _filedir 'json'
-            ;;
-        import)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
-            else
-                _filedir 'json'
+        appmgr__subcmd__help__subcmd__clean)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
-        info|run)
-            if [[ $cword -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+        appmgr__subcmd__help__subcmd__completions)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
             fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__doctor)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__env)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__export)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__info)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__install)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__link)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__pin)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__remove)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__rollback)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__run)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__search)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__self__subcmd__update)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__unpin)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__update__subcmd__db)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__upgrade)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__import)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__info)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__install)
+            opts="-f -y -h --force --yes --repo --prefer --pre --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --repo)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --prefer)
+                    COMPREPLY=($(compgen -W "appimage deb tar zip bin" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__link)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__list)
+            opts="-t -y -h --type --json --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --type)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -t)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__pin)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__remove)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__rollback)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__run)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__search)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__self__subcmd__update)
+            opts="-c -y -h --check --pre --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__unpin)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__update__subcmd__db)
+            opts="-y -h --yes --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__upgrade)
+            opts="-c -y -f -h --check --yes --force --prefer --pre --json --system --user --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --prefer)
+                    COMPREPLY=($(compgen -W "appimage deb tar zip bin" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
             ;;
     esac
 }
 
-complete -F _appmgr_completions appmgr
+if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]; then
+    complete -F _appmgr -o nosort -o bashdefault -o default appmgr
+else
+    complete -F _appmgr -o bashdefault -o default appmgr
+fi

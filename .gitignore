@@ -22,9 +22,13 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Rust build artifacts
+target/
+Cargo.lock
+
 # Arch Linux packaging artifacts
 pkg/
-src/
+appmgr-*/
 *.pkg.tar.zst
 *.pkg.tar.xz
 *.pkg.tar.gz

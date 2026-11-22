@@ -1,47 +1,178 @@
-# Fish completion for appmgr
+# Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
+function __fish_appmgr_global_optspecs
+    string join \n y/yes system user h/help V/version
+end
 
-complete -c appmgr -f
+function __fish_appmgr_needs_command
+    # Figure out if the current invocation already has a command.
+    set -l cmd (commandline -opc)
+    set -e cmd[1]
+    argparse -s (__fish_appmgr_global_optspecs) -- $cmd 2>/dev/null
+    or return
+    if set -q argv[1]
+        # Also print the command, so this can be used to figure out what it is.
+        echo $argv[1]
+        return 1
+    end
+    return 0
+end
 
-# Commands
-complete -c appmgr -n "__fish_use_subcommand" -a install -d "Install application locally, from GitHub, or search by name"
-complete -c appmgr -n "__fish_use_subcommand" -a search -d "Search GitHub repositories for applications"
-complete -c appmgr -n "__fish_use_subcommand" -a link -d "Link installed application to a GitHub repository"
-complete -c appmgr -n "__fish_use_subcommand" -a upgrade -d "Check and upgrade packages from GitHub Releases"
-complete -c appmgr -n "__fish_use_subcommand" -a remove -d "Remove an installed application"
-complete -c appmgr -n "__fish_use_subcommand" -a list -d "List installed applications"
-complete -c appmgr -n "__fish_use_subcommand" -a info -d "Inspect package details or file"
-complete -c appmgr -n "__fish_use_subcommand" -a doctor -d "Diagnose system health and dependencies"
-complete -c appmgr -n "__fish_use_subcommand" -a run -d "Run an installed application"
-complete -c appmgr -n "__fish_use_subcommand" -a env -d "Manage environment variables for an application"
-complete -c appmgr -n "__fish_use_subcommand" -a args -d "Manage persistent launch arguments for an application"
-complete -c appmgr -n "__fish_use_subcommand" -a pin -d "Freeze an application version to skip general upgrades"
-complete -c appmgr -n "__fish_use_subcommand" -a unpin -d "Unfreeze an application version to allow updates"
-complete -c appmgr -n "__fish_use_subcommand" -a rollback -d "Restore previous version of an application from cache"
-complete -c appmgr -n "__fish_use_subcommand" -a clean -d "Clean rollback backups and temporary cache"
-complete -c appmgr -n "__fish_use_subcommand" -a export -d "Export installed applications to a JSON manifest"
-complete -c appmgr -n "__fish_use_subcommand" -a import -d "Install applications from a JSON manifest"
-complete -c appmgr -n "__fish_use_subcommand" -a update-db -d "Update desktop database and caches"
+function __fish_appmgr_using_subcommand
+    set -l cmd (__fish_appmgr_needs_command)
+    test -z "$cmd"
+    and return 1
+    contains -- $cmd[1] $argv
+end
 
-# Flags
-complete -c appmgr -l system -d "Force system installation"
-complete -c appmgr -l user -d "Force user installation"
-complete -c appmgr -s v -l version -d "Show version"
-complete -c appmgr -s y -l yes -d "Assume yes to all prompts"
-
-# Subcommand args
-complete -c appmgr -n "__fish_seen_subcommand_from install" -s y -l yes -d "Assume yes"
-complete -c appmgr -n "__fish_seen_subcommand_from install" -s f -l force -d "Force overwrite"
-complete -c appmgr -n "__fish_seen_subcommand_from install" -l repo -d "Link to GitHub owner/repo"
-complete -c appmgr -n "__fish_seen_subcommand_from install" -l prefer -a "appimage deb tar zip bin" -d "Preferred asset format"
-complete -c appmgr -n "__fish_seen_subcommand_from install" -l pre -d "Allow pre-releases"
-complete -c appmgr -n "__fish_seen_subcommand_from install" -r -F
-
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -s c -l check -d "Check for updates without installing"
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -s y -l yes -d "Assume yes"
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -s f -l force -d "Force upgrade even if pinned"
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -l prefer -a "appimage deb tar zip bin" -d "Preferred asset format"
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -l pre -d "Include pre-releases in update check"
-complete -c appmgr -n "__fish_seen_subcommand_from upgrade" -l json -d "Output machine-readable JSON"
-
-complete -c appmgr -n "__fish_seen_subcommand_from list" -s t -l type -a "deb appimage tar zip bin" -d "Filter by format"
-complete -c appmgr -n "__fish_seen_subcommand_from list" -l json -d "Output machine-readable JSON"
+complete -c appmgr -n "__fish_appmgr_needs_command" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_needs_command" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_needs_command" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_needs_command" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c appmgr -n "__fish_appmgr_needs_command" -s V -l version -d 'Print version'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "install" -d 'Install application locally, from GitHub (owner/repo[@tag]), or search'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "search" -d 'Search GitHub repositories for applications'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "link" -d 'Link an installed application to a GitHub repository for updates'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "upgrade" -d 'Check and upgrade packages from GitHub Releases'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "remove" -d 'Remove an installed application'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "list" -d 'List installed applications'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "info" -d 'Display details about a package or file'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "doctor" -d 'Check system health, FUSE, and broken symlinks'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "run" -d 'Launch an installed application'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "env" -d 'Manage custom environment variables for an application'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "args" -d 'Manage persistent launch flags for an application'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "pin" -d 'Freeze an application version to skip general upgrades'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "unpin" -d 'Unfreeze an application version to allow updates'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "rollback" -d 'Restore previous version of an application from cache'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "clean" -d 'Clean rollback backups and temporary cache'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "export" -d 'Export installed applications to a JSON manifest'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "import" -d 'Install applications from a JSON manifest'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "update-db" -d 'Refresh desktop database and icon theme caches'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "self-update" -d 'Update appmgr itself to the latest version'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "completions" -d 'Generate shell completions (bash, zsh, fish)'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l repo -d 'Associate package with GitHub repository (owner/repo)' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l prefer -d 'Preferred asset format' -r -f -a "appimage\t''
+deb\t''
+tar\t''
+zip\t''
+bin\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s f -l force -d 'Force overwrite existing installation'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s y -l yes -d 'Assume yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l pre -d 'Allow pre-release versions'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand link" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand link" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand link" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand link" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l prefer -d 'Preferred asset format' -r -f -a "appimage\t''
+deb\t''
+tar\t''
+zip\t''
+bin\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s c -l check -d 'Check for available updates without installing'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s y -l yes -d 'Assume yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s f -l force -d 'Force upgrade even if pinned'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l pre -d 'Include pre-releases in update check'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l json -d 'Output machine-readable JSON'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -s y -l yes -d 'Assume yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s t -l type -d 'Filter by package format' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l json -d 'Output machine-readable JSON'
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand run" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand run" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand run" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand run" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l unset -d 'Unset an environment variable' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l list -d 'List configured environment variables'
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l clear -d 'Clear all persistent launch flags'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l list -d 'List configured launch flags'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -s y -l yes -d 'Assume yes to prompt'
+complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -s y -l yes -d 'Assume yes to prompt'
+complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand export" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand export" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand export" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand export" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand import" -s y -l yes -d 'Assume yes to all prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand import" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand import" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand import" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s c -l check -d 'Check for available appmgr updates without installing'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l pre -d 'Allow pre-release versions'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s y -l yes -d 'Assume yes to prompt'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -s y -l yes -d 'Automatic yes to prompts'
+complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -l user -d 'Force user-level rootless mode (~/.local)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "install" -d 'Install application locally, from GitHub (owner/repo[@tag]), or search'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "search" -d 'Search GitHub repositories for applications'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "link" -d 'Link an installed application to a GitHub repository for updates'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "upgrade" -d 'Check and upgrade packages from GitHub Releases'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "remove" -d 'Remove an installed application'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "list" -d 'List installed applications'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "info" -d 'Display details about a package or file'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "doctor" -d 'Check system health, FUSE, and broken symlinks'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "run" -d 'Launch an installed application'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "env" -d 'Manage custom environment variables for an application'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "args" -d 'Manage persistent launch flags for an application'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "pin" -d 'Freeze an application version to skip general upgrades'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "unpin" -d 'Unfreeze an application version to allow updates'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "rollback" -d 'Restore previous version of an application from cache'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "clean" -d 'Clean rollback backups and temporary cache'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "export" -d 'Export installed applications to a JSON manifest'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "import" -d 'Install applications from a JSON manifest'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "update-db" -d 'Refresh desktop database and icon theme caches'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "self-update" -d 'Update appmgr itself to the latest version'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "completions" -d 'Generate shell completions (bash, zsh, fish)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'

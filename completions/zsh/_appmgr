@@ -1,118 +1,645 @@
 #compdef appmgr
 
+autoload -U is-at-least
+
 _appmgr() {
-    local -a commands
-    commands=(
-        'install:Install application locally, from GitHub, or search by name'
-        'search:Search GitHub repositories for applications'
-        'link:Link an installed application to a GitHub repository'
-        'upgrade:Check and upgrade packages from GitHub Releases'
-        'remove:Remove an installed package'
-        'list:List installed applications'
-        'info:Display metadata about a package or file'
-        'doctor:Check system integration, FUSE, and dependencies'
-        'run:Launch an installed application'
-        'env:Manage environment variables for an application'
-        'args:Manage persistent launch arguments for an application'
-        'pin:Freeze an application version to skip general upgrades'
-        'unpin:Unfreeze an application version to allow updates'
-        'rollback:Restore previous version of an application from cache'
-        'clean:Clean rollback backups and temporary cache'
-        'export:Export installed applications to a JSON manifest'
-        'import:Install applications from a JSON manifest'
-        'update-db:Refresh desktop database and icon theme caches'
-    )
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
 
-    _arguments -C \
-        '(-v --version)'{-v,--version}'[Show version]' \
-        '--system[Force system installation]' \
-        '--user[Force user-level installation]' \
-        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes to all prompts]' \
-        '1: :->cmd' \
-        '*:: :->args'
-
-    local installed_apps
-    if [[ -f "$HOME/.local/share/appmgr/installed.json" ]]; then
-        installed_apps=(${(f)"$(grep -o '"id": "[^"]*"' "$HOME/.local/share/appmgr/installed.json" 2>/dev/null | cut -d'"' -f4)"})
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
     fi
 
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'-V[Print version]' \
+'--version[Print version]' \
+":: :_appmgr_commands" \
+"*::: :->appmgr" \
+&& ret=0
     case $state in
-        cmd)
-            _describe -t commands 'appmgr command' commands
-            ;;
-        args)
-            case $words[1] in
-                install|i|in)
-                    _arguments \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
-                        '(-f --force)'{-f,--force}'[Force reinstall]' \
-                        '--repo[Associate with GitHub repository]:repo:_guard "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$" "owner/repo"' \
-                        '--prefer[Preferred format]:format:(appimage deb tar zip bin)' \
-                        '--pre[Allow pre-releases]' \
-                        '1:package:_files -g "*.deb *.AppImage *.appimage *.tar.xz *.tar.zst *.tar.gz *.tgz *.tar.bz2 *.txz *.tzst *.tar *.zip"'
-                    ;;
-                link)
-                    _arguments \
-                        '1:app:(${installed_apps})' \
-                        '2:repo:_guard "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$" "owner/repo"'
-                    ;;
-                upgrade|up|update)
-                    _arguments \
-                        '(-c --check)'{-c,--check}'[Check for updates without installing]' \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
-                        '(-f --force)'{-f,--force}'[Force upgrade even if pinned]' \
-                        '--prefer[Preferred format]:format:(appimage deb tar zip bin)' \
-                        '--pre[Include pre-releases in update check]' \
-                        '--json[Output JSON]' \
-                        '1:app:(${installed_apps})'
-                    ;;
-                remove|rm|uninstall|purge)
-                    _arguments \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
-                        '1:app:(${installed_apps})'
-                    ;;
-                list|ls)
-                    _arguments \
-                        '(-t --type)'{-t,--type}'[Filter by format]:format:(deb appimage tar zip bin)' \
-                        '--json[Output JSON]'
-                    ;;
-                env)
-                    _arguments \
-                        '--unset[Unset variable]:key:' \
-                        '(-l --list)'{-l,--list}'[List environment variables]' \
-                        '1:app:(${installed_apps})' \
-                        '*:pairs:'
-                    ;;
-                args)
-                    _arguments \
-                        '--clear[Clear persistent arguments]' \
-                        '(-l --list)'{-l,--list}'[List persistent arguments]' \
-                        '1:app:(${installed_apps})' \
-                        '*:flags:'
-                    ;;
-                pin|unpin|rollback)
-                    _arguments \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
-                        '1:app:(${installed_apps})'
-                    ;;
-                clean)
-                    _arguments \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]'
-                    ;;
-                export)
-                    _arguments '1:file:_files -g "*.json"'
-                    ;;
-                import)
-                    _arguments \
-                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
-                        '1:file:_files -g "*.json"'
-                    ;;
-                info|run)
-                    _arguments '1:app:(${installed_apps})'
-                    ;;
-            esac
-            ;;
-    esac
+    (appmgr)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:appmgr-command-$line[1]:"
+        case $line[1] in
+            (install)
+_arguments "${_arguments_options[@]}" : \
+'--repo=[Associate package with GitHub repository (owner/repo)]:REPO:_default' \
+'--prefer=[Preferred asset format]:PREFER:(appimage deb tar zip bin)' \
+'-f[Force overwrite existing installation]' \
+'--force[Force overwrite existing installation]' \
+'-y[Assume yes to prompts]' \
+'--yes[Assume yes to prompts]' \
+'--pre[Allow pre-release versions]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':package -- Path to package, GitHub target (owner/repo\[@tag\]), or search query:_default' \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':query -- Application name or search query:_default' \
+&& ret=0
+;;
+(link)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Installed application name or ID:_default' \
+':repo -- GitHub repository (owner/repo or URL):_default' \
+&& ret=0
+;;
+(upgrade)
+_arguments "${_arguments_options[@]}" : \
+'--prefer=[Preferred asset format]:PREFER:(appimage deb tar zip bin)' \
+'-c[Check for available updates without installing]' \
+'--check[Check for available updates without installing]' \
+'-y[Assume yes to prompts]' \
+'--yes[Assume yes to prompts]' \
+'-f[Force upgrade even if pinned]' \
+'--force[Force upgrade even if pinned]' \
+'--pre[Include pre-releases in update check]' \
+'--json[Output machine-readable JSON]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::app -- Specific application to upgrade (optional):_default' \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+'-y[Assume yes to prompts]' \
+'--yes[Assume yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':package -- Name or ID of installed application:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Filter by package format]:FILTER_TYPE:_default' \
+'--type=[Filter by package format]:FILTER_TYPE:_default' \
+'--json[Output machine-readable JSON]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(info)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':target -- Package ID or file path to inspect:_default' \
+&& ret=0
+;;
+(doctor)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+'*::args -- Arguments passed to application:_default' \
+&& ret=0
+;;
+(env)
+_arguments "${_arguments_options[@]}" : \
+'--unset=[Unset an environment variable]:UNSET:_default' \
+'--list[List configured environment variables]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+'*::pairs -- Variable pairs to set (e.g. KEY=VALUE):_default' \
+&& ret=0
+;;
+(args)
+_arguments "${_arguments_options[@]}" : \
+'--clear[Clear all persistent launch flags]' \
+'--list[List configured launch flags]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+'*::cli_args -- Persistent flags to pass:_default' \
+&& ret=0
+;;
+(pin)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+&& ret=0
+;;
+(unpin)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+&& ret=0
+;;
+(rollback)
+_arguments "${_arguments_options[@]}" : \
+'-y[Assume yes to prompt]' \
+'--yes[Assume yes to prompt]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+&& ret=0
+;;
+(clean)
+_arguments "${_arguments_options[@]}" : \
+'-y[Assume yes to prompt]' \
+'--yes[Assume yes to prompt]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::file -- Destination file (default\: appmgr-manifest.json):_default' \
+&& ret=0
+;;
+(import)
+_arguments "${_arguments_options[@]}" : \
+'-y[Assume yes to all prompts]' \
+'--yes[Assume yes to all prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':file -- Path to manifest JSON file:_default' \
+&& ret=0
+;;
+(update-db)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(self-update)
+_arguments "${_arguments_options[@]}" : \
+'-c[Check for available appmgr updates without installing]' \
+'--check[Check for available appmgr updates without installing]' \
+'--pre[Allow pre-release versions]' \
+'-y[Assume yes to prompt]' \
+'--yes[Assume yes to prompt]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':shell -- Shell to generate completions for:(bash elvish fish powershell zsh)' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_appmgr__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:appmgr-help-command-$line[1]:"
+        case $line[1] in
+            (install)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(link)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(upgrade)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(info)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(doctor)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(env)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(args)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(pin)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(unpin)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(rollback)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clean)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(import)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(update-db)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(self-update)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
 }
 
-_appmgr "$@"
+(( $+functions[_appmgr_commands] )) ||
+_appmgr_commands() {
+    local commands; commands=(
+'install:Install application locally, from GitHub (owner/repo\[@tag\]), or search' \
+'search:Search GitHub repositories for applications' \
+'link:Link an installed application to a GitHub repository for updates' \
+'upgrade:Check and upgrade packages from GitHub Releases' \
+'remove:Remove an installed application' \
+'list:List installed applications' \
+'info:Display details about a package or file' \
+'doctor:Check system health, FUSE, and broken symlinks' \
+'run:Launch an installed application' \
+'env:Manage custom environment variables for an application' \
+'args:Manage persistent launch flags for an application' \
+'pin:Freeze an application version to skip general upgrades' \
+'unpin:Unfreeze an application version to allow updates' \
+'rollback:Restore previous version of an application from cache' \
+'clean:Clean rollback backups and temporary cache' \
+'export:Export installed applications to a JSON manifest' \
+'import:Install applications from a JSON manifest' \
+'update-db:Refresh desktop database and icon theme caches' \
+'self-update:Update appmgr itself to the latest version' \
+'completions:Generate shell completions (bash, zsh, fish)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'appmgr commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__args_commands] )) ||
+_appmgr__subcmd__args_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr args commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__clean_commands] )) ||
+_appmgr__subcmd__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr clean commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__completions_commands] )) ||
+_appmgr__subcmd__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr completions commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__doctor_commands] )) ||
+_appmgr__subcmd__doctor_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr doctor commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__env_commands] )) ||
+_appmgr__subcmd__env_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr env commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__export_commands] )) ||
+_appmgr__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr export commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help_commands] )) ||
+_appmgr__subcmd__help_commands() {
+    local commands; commands=(
+'install:Install application locally, from GitHub (owner/repo\[@tag\]), or search' \
+'search:Search GitHub repositories for applications' \
+'link:Link an installed application to a GitHub repository for updates' \
+'upgrade:Check and upgrade packages from GitHub Releases' \
+'remove:Remove an installed application' \
+'list:List installed applications' \
+'info:Display details about a package or file' \
+'doctor:Check system health, FUSE, and broken symlinks' \
+'run:Launch an installed application' \
+'env:Manage custom environment variables for an application' \
+'args:Manage persistent launch flags for an application' \
+'pin:Freeze an application version to skip general upgrades' \
+'unpin:Unfreeze an application version to allow updates' \
+'rollback:Restore previous version of an application from cache' \
+'clean:Clean rollback backups and temporary cache' \
+'export:Export installed applications to a JSON manifest' \
+'import:Install applications from a JSON manifest' \
+'update-db:Refresh desktop database and icon theme caches' \
+'self-update:Update appmgr itself to the latest version' \
+'completions:Generate shell completions (bash, zsh, fish)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'appmgr help commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__args_commands] )) ||
+_appmgr__subcmd__help__subcmd__args_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help args commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__clean_commands] )) ||
+_appmgr__subcmd__help__subcmd__clean_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help clean commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__completions_commands] )) ||
+_appmgr__subcmd__help__subcmd__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help completions commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__doctor_commands] )) ||
+_appmgr__subcmd__help__subcmd__doctor_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help doctor commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__env_commands] )) ||
+_appmgr__subcmd__help__subcmd__env_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help env commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__export_commands] )) ||
+_appmgr__subcmd__help__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help export commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__help_commands] )) ||
+_appmgr__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help help commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__import_commands] )) ||
+_appmgr__subcmd__help__subcmd__import_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help import commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__info_commands] )) ||
+_appmgr__subcmd__help__subcmd__info_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help info commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__install_commands] )) ||
+_appmgr__subcmd__help__subcmd__install_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help install commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__link_commands] )) ||
+_appmgr__subcmd__help__subcmd__link_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help link commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__list_commands] )) ||
+_appmgr__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help list commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__pin_commands] )) ||
+_appmgr__subcmd__help__subcmd__pin_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help pin commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__remove_commands] )) ||
+_appmgr__subcmd__help__subcmd__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help remove commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__rollback_commands] )) ||
+_appmgr__subcmd__help__subcmd__rollback_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help rollback commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__run_commands] )) ||
+_appmgr__subcmd__help__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help run commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__search_commands] )) ||
+_appmgr__subcmd__help__subcmd__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help search commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__self-update_commands] )) ||
+_appmgr__subcmd__help__subcmd__self-update_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help self-update commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__unpin_commands] )) ||
+_appmgr__subcmd__help__subcmd__unpin_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help unpin commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__update-db_commands] )) ||
+_appmgr__subcmd__help__subcmd__update-db_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help update-db commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__upgrade_commands] )) ||
+_appmgr__subcmd__help__subcmd__upgrade_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help upgrade commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__import_commands] )) ||
+_appmgr__subcmd__import_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr import commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__info_commands] )) ||
+_appmgr__subcmd__info_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr info commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__install_commands] )) ||
+_appmgr__subcmd__install_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr install commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__link_commands] )) ||
+_appmgr__subcmd__link_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr link commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__list_commands] )) ||
+_appmgr__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr list commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__pin_commands] )) ||
+_appmgr__subcmd__pin_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr pin commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__remove_commands] )) ||
+_appmgr__subcmd__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr remove commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__rollback_commands] )) ||
+_appmgr__subcmd__rollback_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr rollback commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__run_commands] )) ||
+_appmgr__subcmd__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr run commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__search_commands] )) ||
+_appmgr__subcmd__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr search commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__self-update_commands] )) ||
+_appmgr__subcmd__self-update_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr self-update commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__unpin_commands] )) ||
+_appmgr__subcmd__unpin_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr unpin commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__update-db_commands] )) ||
+_appmgr__subcmd__update-db_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr update-db commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__upgrade_commands] )) ||
+_appmgr__subcmd__upgrade_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr upgrade commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_appmgr" ]; then
+    _appmgr "$@"
+else
+    compdef _appmgr appmgr
+fi
