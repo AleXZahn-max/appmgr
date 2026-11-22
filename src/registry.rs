@@ -91,9 +91,31 @@ pub struct RegistryIndex {
     pub registry_name: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "generated_at")]
     pub updated_at: Option<String>,
-    pub packages: Vec<RegistryPackage>,
+    pub packages: HashMap<String, Recipe>,
+}
+
+impl RegistryIndex {
+    pub fn get_packages(&self) -> Vec<RegistryPackage> {
+        self.packages
+            .values()
+            .map(|r| RegistryPackage {
+                id: r.package.id.clone(),
+                name: r.package.name.clone(),
+                description: r.package.description.clone(),
+                homepage: r.package.homepage.clone(),
+                license: r.package.license.clone(),
+                categories: r.package.categories.clone(),
+                format: r.package.format.clone(),
+                bin_name: r.package.bin_name.clone(),
+                gui: r.package.gui,
+                source: r.source.clone(),
+                runtime: r.runtime.clone(),
+                sandbox: r.sandbox.clone(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -345,12 +367,16 @@ pub async fn sync_registries(
             continue;
         }
 
-        // HTTP/HTTPS Fetch with ETag caching
+        // HTTP/HTTPS Fetch with ETag / Last-Modified caching
         let mut req = client.get(&entry.url);
         let existing_etag = fs::read_to_string(&etag_file).ok().map(|s| s.trim().to_string());
         if let Some(ref etag) = existing_etag {
             if cache_file.exists() {
-                req = req.header("If-None-Match", etag.as_str());
+                if etag.starts_with('"') || etag.starts_with("W/") {
+                    req = req.header("If-None-Match", etag.as_str());
+                } else {
+                    req = req.header("If-Modified-Since", etag.as_str());
+                }
             }
         }
 
@@ -375,6 +401,7 @@ pub async fn sync_registries(
                     let new_etag = resp
                         .headers()
                         .get("etag")
+                        .or_else(|| resp.headers().get("last-modified"))
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
@@ -470,9 +497,25 @@ pub fn find_package_in_registries(
             continue;
         }
         if let Some(idx) = get_cached_index(cache_dir, &entry.id) {
-            for pkg in idx.packages {
-                if pkg.id.to_lowercase() == lower_target {
-                    return Some((entry.id.clone(), pkg));
+            for (key, r) in &idx.packages {
+                if key.to_lowercase() == lower_target || r.package.id.to_lowercase() == lower_target {
+                    return Some((
+                        entry.id.clone(),
+                        RegistryPackage {
+                            id: r.package.id.clone(),
+                            name: r.package.name.clone(),
+                            description: r.package.description.clone(),
+                            homepage: r.package.homepage.clone(),
+                            license: r.package.license.clone(),
+                            categories: r.package.categories.clone(),
+                            format: r.package.format.clone(),
+                            bin_name: r.package.bin_name.clone(),
+                            gui: r.package.gui,
+                            source: r.source.clone(),
+                            runtime: r.runtime.clone(),
+                            sandbox: r.sandbox.clone(),
+                        },
+                    ));
                 }
             }
         }
@@ -494,7 +537,7 @@ pub fn search_registries(
             continue;
         }
         if let Some(idx) = get_cached_index(cache_dir, &entry.id) {
-            for pkg in idx.packages {
+            for pkg in idx.get_packages() {
                 if seen_ids.contains(&pkg.id) {
                     continue;
                 }
