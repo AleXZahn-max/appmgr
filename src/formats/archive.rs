@@ -236,7 +236,7 @@ impl ArchivePackage {
 # Wrapper created by appmgr for {pkg_id} ({fmt_name} binary)
 APP_ROOT="{app_dir}"
 export PATH="$APP_ROOT/bin:$APP_ROOT/usr/bin:$APP_ROOT:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/usr/lib:$APP_ROOT/lib{extra_ld}:${{LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/lib{extra_ld}:${{LD_LIBRARY_PATH}}"
 export XDG_DATA_DIRS="$APP_ROOT/share:$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"{env_block}
 {args_block}
 exec "$APP_ROOT/{rel_bin}" "${{PERSISTENT_ARGS[@]}}" "$@"

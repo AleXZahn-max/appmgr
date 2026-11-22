@@ -25,6 +25,9 @@ _appmgr() {
             appmgr,completions)
                 cmd="appmgr__subcmd__completions"
                 ;;
+            appmgr,deps)
+                cmd="appmgr__subcmd__deps"
+                ;;
             appmgr,doctor)
                 cmd="appmgr__subcmd__doctor"
                 ;;
@@ -99,6 +102,9 @@ _appmgr() {
                 ;;
             appmgr__subcmd__help,completions)
                 cmd="appmgr__subcmd__help__subcmd__completions"
+                ;;
+            appmgr__subcmd__help,deps)
+                cmd="appmgr__subcmd__help__subcmd__deps"
                 ;;
             appmgr__subcmd__help,doctor)
                 cmd="appmgr__subcmd__help__subcmd__doctor"
@@ -281,7 +287,7 @@ _appmgr() {
 
     case "${cmd}" in
         appmgr)
-            opts="-y -h -V --yes --system --user --help --version install search update repo source pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="-y -h -V --yes --system --user --help --version install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -324,6 +330,20 @@ _appmgr() {
             ;;
         appmgr__subcmd__completions)
             opts="-y -h --yes --system --user --help bash elvish fish powershell zsh"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__deps)
+            opts="-y -h --all --fix --auto-deps --rootless-deps --yes --system --user --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -383,7 +403,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__help)
-            opts="install search update repo source pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -425,6 +445,20 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__help__subcmd__completions)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__deps)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -915,7 +949,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__install)
-            opts="-f -y -h --force --yes --repo --prefer --pre --system --user --help"
+            opts="-f -y -h --force --yes --repo --prefer --pre --auto-deps --no-deps --rootless-deps --system --user --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

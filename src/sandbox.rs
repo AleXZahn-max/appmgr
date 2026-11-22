@@ -95,7 +95,7 @@ if command -v bwrap >/dev/null 2>&1 && [ "$APPMGR_NO_BWRAP" != "1" ]; then
 {bwrap_mount_block}
 
 {container_bin_line}
-    export LD_LIBRARY_PATH="$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
+    export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
     export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
 
     exec bwrap "${{BWRAP_ARGS[@]}}" "$CONTAINER_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
@@ -103,7 +103,7 @@ fi
 
 # 2. Standard direct execution fallback
 export PATH="$APP_ROOT/usr/bin:$APP_ROOT/bin:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
 export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
 
 exec "$TARGET_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"

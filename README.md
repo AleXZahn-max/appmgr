@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.1.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.2.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
 │  Reading package lists... Done                                                         │
@@ -262,6 +262,11 @@ appmgr install ~/Downloads/Obsidian-1.5.8.AppImage
 appmgr install ~/Downloads/ripgrep-14.1.0-x86_64-linux.tar.gz
 appmgr install ~/Downloads/tool.zip
 
+# Automatic dependency resolution options:
+appmgr install spotify-client --auto-deps     # Auto-install host packages without extra prompts
+appmgr install discord --rootless-deps       # Force rootless sandbox dependency isolation
+appmgr install btop --no-deps               # Skip dependency checking
+
 # Non-interactive mode (assumes yes):
 appmgr install apt-gh:gh -y
 ```
@@ -355,7 +360,22 @@ appmgr export my-apps.json
 appmgr import my-apps.json -y
 ```
 
-### 11. System Diagnostics & Inspection (`doctor` / `info` / `run`)
+### 11. Shared Library Diagnostics & Repair (`deps`)
+```bash
+# Check shared library dependencies of an installed application:
+appmgr deps spotify-client
+
+# Check dependencies for all installed applications:
+appmgr deps --all
+
+# Automatically fix missing libraries (hybrid host PM + rootless fallback):
+appmgr deps spotify-client --fix
+
+# Non-interactive automated repair across all applications:
+appmgr deps --all --fix --auto-deps
+```
+
+### 12. System Diagnostics & Inspection (`doctor` / `info` / `run`)
 ```bash
 # Run comprehensive diagnostic checks (FUSE, bwrap, libraries, PATH):
 appmgr doctor
@@ -367,7 +387,7 @@ appmgr info btop
 appmgr run btop
 ```
 
-### 12. Removing Applications (`remove`)
+### 13. Removing Applications (`remove`)
 ```bash
 appmgr remove btop -y
 ```

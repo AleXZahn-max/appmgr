@@ -374,12 +374,16 @@ pub async fn sync_all_sources(
     let local_sources = load_sources(sources_file)?;
     let mut updated_sources_count = 0;
     let mut total_packages = 0;
+    let mut seq_counter = 1;
 
     // 1. Update meta-registries (sources.json)
     for entry in &local_sources {
         if entry.driver != "registry" || !entry.enabled {
             continue;
         }
+
+        let num = seq_counter;
+        seq_counter += 1;
 
         let cache_file = registries_cache_dir.join(format!("{}.json", entry.id));
         let etag_file = registries_cache_dir.join(format!("{}.etag", entry.id));
@@ -398,7 +402,7 @@ pub async fn sync_all_sources(
 
         match req.send().await {
             Ok(resp) if resp.status() == StatusCode::NOT_MODIFIED => {
-                println!("Hit:1 [{}] (cached registry)", c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]));
+                println!("Hit:{} [{}] (cached registry)", num, c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]));
             }
             Ok(resp) if resp.status().is_success() => {
                 let new_etag = resp
@@ -411,7 +415,8 @@ pub async fn sync_all_sources(
                 if let Ok(bytes) = resp.bytes().await {
                     let kb = bytes.len() as f64 / 1024.0;
                     println!(
-                        "Get:1 {} [{}] ({:.1} KiB)",
+                        "Get:{} {} [{}] ({:.1} KiB)",
+                        num,
                         entry.url,
                         c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
                         kb
@@ -451,23 +456,22 @@ pub async fn sync_all_sources(
     let mut tasks = Vec::new();
     let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(6));
 
-    for (idx, src) in effective.into_iter().enumerate() {
-        if !src.enabled {
-            continue;
-        }
+    let indexed_sources: Vec<_> = effective
+        .into_iter()
+        .filter(|src| {
+            src.enabled
+                && (src.mode.as_deref() == Some("indexed")
+                    || src.driver == "apt"
+                    || src.driver == "appimagehub")
+        })
+        .collect();
 
-        let is_indexed = src.mode.as_deref() == Some("indexed")
-            || src.driver == "apt"
-            || src.driver == "appimagehub";
-
-        if !is_indexed {
-            continue;
-        }
-
+    for src in indexed_sources {
         let permit = sem.clone();
         let http = client.clone();
         let cache_dir = indexes_cache_dir.to_path_buf();
-        let num = idx + 1;
+        let num = seq_counter;
+        seq_counter += 1;
 
         tasks.push(tokio::spawn(async move {
             let _permit = permit.acquire().await.unwrap();

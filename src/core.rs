@@ -43,6 +43,7 @@ impl Core {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn install(
         &mut self,
         target_str: &str,
@@ -51,6 +52,9 @@ impl Core {
         repo: Option<String>,
         prefer: Option<&str>,
         include_pre: bool,
+        auto_deps: bool,
+        no_deps: bool,
+        rootless_deps: bool,
     ) -> Result<bool, String> {
         let local_path = Path::new(target_str);
         if local_path.is_file() {
@@ -68,7 +72,7 @@ impl Core {
                     return Ok(false);
                 }
             }
-            return self.install_local_file(
+            let res = self.install_local_file(
                 local_path,
                 force,
                 assume_yes,
@@ -80,7 +84,12 @@ impl Core {
                 None,
                 false,
                 None,
-            );
+            )?;
+            if let Some(ref id) = res {
+                self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                return Ok(true);
+            }
+            return Ok(false);
         }
 
         let effective_sources = crate::registry::get_effective_sources(
@@ -115,14 +124,24 @@ impl Core {
                                 let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
                                 let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
                                 if let Some(p) = pkgs.get(pkg_name) {
-                                    return self.install_from_apt_source(src, p, force, assume_yes).await;
+                                    let res = self.install_from_apt_source(src, p, force, assume_yes).await?;
+                                    if let Some(ref id) = res {
+                                        self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                                        return Ok(true);
+                                    }
+                                    return Ok(false);
                                 }
                             }
                             "appimagehub" => {
                                 let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
                                 let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
                                 if let Some(p) = pkgs.get(pkg_name).or_else(|| pkgs.values().find(|v| v.name.eq_ignore_ascii_case(pkg_name))) {
-                                    return self.install_from_appimagehub(src, p, force, assume_yes).await;
+                                    let res = self.install_from_appimagehub(src, p, force, assume_yes).await?;
+                                    if let Some(ref id) = res {
+                                        self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                                        return Ok(true);
+                                    }
+                                    return Ok(false);
                                 }
                             }
                             _ => {}
@@ -142,7 +161,7 @@ impl Core {
         {
             let repo_name = parsed_repo
                 .ok_or_else(|| format!("Invalid GitHub repository format: {}", target_str))?;
-            return self
+            let res = self
                 .install_from_github(
                     &repo_name,
                     tag.as_deref(),
@@ -151,7 +170,12 @@ impl Core {
                     prefer,
                     include_pre,
                 )
-                .await;
+                .await?;
+            if let Some(ref id) = res {
+                self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                return Ok(true);
+            }
+            return Ok(false);
         }
 
         // Search local indexed packages (APT, AppImageHub) by priority
@@ -164,14 +188,24 @@ impl Core {
                     let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
                     let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
                     if let Some(p) = pkgs.get(target_str) {
-                        return self.install_from_apt_source(src, p, force, assume_yes).await;
+                        let res = self.install_from_apt_source(src, p, force, assume_yes).await?;
+                        if let Some(ref id) = res {
+                            self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                            return Ok(true);
+                        }
+                        return Ok(false);
                     }
                 }
                 "appimagehub" => {
                     let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
                     let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
                     if let Some(p) = pkgs.get(target_str).or_else(|| pkgs.values().find(|v| v.name.eq_ignore_ascii_case(target_str))) {
-                        return self.install_from_appimagehub(src, p, force, assume_yes).await;
+                        let res = self.install_from_appimagehub(src, p, force, assume_yes).await?;
+                        if let Some(ref id) = res {
+                            self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+                            return Ok(true);
+                        }
+                        return Ok(false);
                     }
                 }
                 _ => {}
@@ -186,8 +220,14 @@ impl Core {
             }
         }
 
-        self.search_and_install(target_str, force, assume_yes, prefer, include_pre)
-            .await
+        let res = self
+            .search_and_install(target_str, force, assume_yes, prefer, include_pre)
+            .await?;
+        if let Some(ref id) = res {
+            self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps).await?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub async fn install_from_github(
@@ -198,7 +238,7 @@ impl Core {
         assume_yes: bool,
         prefer: Option<&str>,
         include_pre: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         let tag_disp = tag
             .map(|t| format!(" ({})", c(t, &[Colors::BOLD, Colors::BRIGHT_YELLOW])))
             .unwrap_or_default();
@@ -223,7 +263,7 @@ impl Core {
                 apt_prefix("FAIL"),
                 repo
             );
-            return Ok(false);
+            return Ok(None);
         }
 
         let release = release_opt.unwrap();
@@ -238,7 +278,7 @@ impl Core {
             );
             if !confirm_dialog(&format!("Install pre-release {}?", tag_name), true) {
                 println!("{} Installation aborted.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                return Ok(false);
+                return Ok(None);
             }
         }
 
@@ -255,7 +295,7 @@ impl Core {
                 tag_name,
                 std::env::consts::ARCH
             );
-            return Ok(false);
+            return Ok(None);
         }
 
         self.download_and_install_asset(repo, &release, &candidates, etag, force, assume_yes)
@@ -269,7 +309,7 @@ impl Core {
         assume_yes: bool,
         prefer: Option<&str>,
         include_pre: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         println!(
             "{} Searching GitHub repositories for '{}'...",
             c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
@@ -286,7 +326,7 @@ impl Core {
                 apt_prefix("FAIL"),
                 query
             );
-            return Ok(false);
+            return Ok(None);
         }
 
         let remaining_repos = repos;
@@ -296,7 +336,7 @@ impl Core {
                 Some(r) => r,
                 None => {
                     println!("{} Installation cancelled.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                    return Ok(false);
+                    return Ok(None);
                 }
             };
 
@@ -355,7 +395,7 @@ impl Core {
         }
 
         println!("{} No suitable repositories remaining.", apt_prefix("FAIL"));
-        Ok(false)
+        Ok(None)
     }
 
     async fn download_and_install_asset(
@@ -366,7 +406,7 @@ impl Core {
         etag: Option<String>,
         force: bool,
         assume_yes: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         let chosen = if candidates.len() == 1 || assume_yes {
             &candidates[0]
         } else {
@@ -374,7 +414,7 @@ impl Core {
                 Some(c) => c,
                 None => {
                     println!("{} Installation aborted.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                    return Ok(false);
+                    return Ok(None);
                 }
             }
         };
@@ -428,7 +468,7 @@ impl Core {
         args: Option<Vec<String>>,
         pinned: bool,
         clean_bin_name: Option<String>,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         let fmt = match detect_format(path) {
             Some(f) => f,
             None => {
@@ -436,7 +476,7 @@ impl Core {
                     "{} Unsupported package format. Supported: .AppImage, .deb, .tar.*, .zip, standalone ELF",
                     apt_prefix("FAIL")
                 );
-                return Ok(false);
+                return Ok(None);
             }
         };
 
@@ -451,7 +491,7 @@ impl Core {
                 "        {}\n",
                 c(&format!("sudo pacman -U {}", path.display()), &[Colors::BOLD, Colors::BRIGHT_YELLOW])
             );
-            return Ok(false);
+            return Ok(None);
         }
 
         apt_preflight_animation();
@@ -489,7 +529,7 @@ impl Core {
         if !assume_yes
             && !confirm_dialog("Proceed with installation?", true) {
                 println!("{} Installation aborted by user.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                return Ok(false);
+                return Ok(None);
             }
 
         let start_time = std::time::Instant::now();
@@ -602,7 +642,7 @@ impl Core {
             "   You can now launch it by typing: {}\n",
             c(&pkg_id, &[Colors::BOLD, Colors::BRIGHT_YELLOW])
         );
-        Ok(true)
+        Ok(Some(pkg_id))
     }
 
     pub async fn search(
@@ -641,13 +681,21 @@ impl Core {
                 } else {
                     m.package_id.clone()
                 };
+                let clean_desc = m
+                    .description
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .replace('\t', " ")
+                    .trim()
+                    .to_string();
                 rows.push(vec![
                     format!("[{}]", m.source_id),
                     format!("[{}]", m.driver.to_uppercase()),
                     c(&pkg_display, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
                     format!("[{}]", m.format.to_uppercase()),
                     m.version.clone(),
-                    m.description.clone(),
+                    clean_desc,
                 ]);
             }
 
@@ -1085,7 +1133,8 @@ impl Core {
             );
 
             match ok {
-                Ok(true) => {
+                Ok(Some(ref upgraded_id)) => {
+                    let _ = self.resolve_package_dependencies(upgraded_id, true, false, false).await;
                     success_count += 1;
                     println!(
                         " {} {} upgraded to {}",
@@ -1589,7 +1638,8 @@ impl Core {
             let ok = self
                 .install_from_github(repo_str, None, true, assume_yes, None, false)
                 .await?;
-            if ok {
+            if let Some(ref id) = ok {
+                let _ = self.resolve_package_dependencies(id, false, false, false).await;
                 installed_count += 1;
             }
         }
@@ -1834,68 +1884,53 @@ impl Core {
         }
 
         // Check shared library linkages
-        self.check_pkg_ldd(&pkg);
-        println!();
-    }
-
-    fn check_pkg_ldd(&self, pkg: &PackageRecord) {
-        let app_dir = &pkg.install_dir;
-        let mut target_elfs = Vec::new();
-
-        if app_dir.exists() {
-            for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
-                let p = entry.path();
-                if p.is_file() && !p.is_symlink() && ArchivePackage::is_executable_file(p) {
-                    target_elfs.push(p.to_path_buf());
-                }
-            }
-        }
-
-        let mut has_dynamic = false;
-        let mut missing_all = Vec::new();
-
-        for elf in &target_elfs {
-            if let Ok(output) = Command::new("ldd").arg(elf).output() {
-                let combined = format!(
-                    "{}\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                let lower = combined.to_lowercase();
-                if lower.contains("not a dynamic executable") || lower.contains("statically linked") {
-                    continue;
-                }
-                has_dynamic = true;
-                for line in combined.lines() {
-                    if line.contains("not found") {
-                        if let Some((lib, _)) = line.split_once("=>") {
-                            missing_all.push(lib.trim().to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        if !target_elfs.is_empty() && !has_dynamic {
+        if pkg.format == "appimage" {
             println!(
-                "  {:<16} [static binary] (All libraries statically linked)",
-                c("Dependencies:", &[Colors::BOLD, Colors::BRIGHT_GREEN])
-            );
-        } else if missing_all.is_empty() {
-            println!(
-                "  {:<16} All shared libraries satisfied",
+                "  {:<16} AppImage bundled runtime (self-contained)",
                 c("Dependencies:", &[Colors::BOLD, Colors::BRIGHT_GREEN])
             );
         } else {
-            println!(
-                "  {:<16} {} missing libraries:",
-                c("Dependencies:", &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
-                missing_all.len()
-            );
-            for m in missing_all.iter().take(3) {
-                println!("    - {}", c(m, &[Colors::RED]));
+            let scan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+            if scan.missing_libs.is_empty() {
+                println!(
+                    "  {:<16} All shared libraries satisfied",
+                    c("Dependencies:", &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                );
+            } else {
+                println!(
+                    "  {:<16} {} missing shared libraries:",
+                    c("Dependencies:", &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
+                    scan.missing_libs.len()
+                );
+                for m in scan.missing_libs.iter().take(5) {
+                    println!("    - {}", c(&m.soname, &[Colors::RED]));
+                }
+                if scan.missing_libs.len() > 5 {
+                    println!("    ... and {} more", scan.missing_libs.len() - 5);
+                }
+                println!(
+                    "    Tip: Run {} to diagnose and fix.",
+                    c(&format!("appmgr deps {} --fix", pkg.id), &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                );
             }
         }
+
+        if !pkg.bundled_deps.is_empty() {
+            let sample: Vec<String> = pkg.bundled_deps.iter().take(5).cloned().collect();
+            let more = if pkg.bundled_deps.len() > 5 {
+                format!(" (+{} more)", pkg.bundled_deps.len() - 5)
+            } else {
+                String::new()
+            };
+            println!(
+                "  {:<16} {} ({}{})",
+                c("Bundled Deps:", &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                pkg.bundled_deps.len(),
+                sample.join(", "),
+                more
+            );
+        }
+        println!();
     }
 
     pub fn run_app(&self, app_id: &str, args: &[String]) {
@@ -2375,7 +2410,7 @@ architectures = ["amd64", "arm64"]
         pkg: &crate::drivers::apt::AptPackage,
         force: bool,
         assume_yes: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         println!(
             "{} Resolving package '{}' from APT source [{}]...",
             apt_prefix("INFO"),
@@ -2408,7 +2443,7 @@ architectures = ["amd64", "arm64"]
 
         self.download_direct_url(&deb_url, &target_path, &deb_file_name, expected_sha256).await?;
 
-        let installed = self.install_local_file(
+        let installed_id = self.install_local_file(
             &target_path,
             force,
             assume_yes,
@@ -2422,31 +2457,19 @@ architectures = ["amd64", "arm64"]
             Some(pkg.package.clone()),
         )?;
 
-        if installed {
-            let found_id = if self.db.get(&pkg.package).is_some() {
-                Some(pkg.package.clone())
-            } else {
-                self.db
-                    .all()
-                    .iter()
-                    .find(|p| p.name.eq_ignore_ascii_case(&pkg.package))
-                    .map(|p| p.id.clone())
-            };
-
-            if let Some(id) = found_id {
-                if let Some(record) = self.db.get_mut(&id) {
-                    record.source_type = Some("apt".to_string());
-                    record.registry_name = Some(source.id.clone());
-                    record.recipe_id = Some(pkg.package.clone());
-                    if let Some(ref desc) = pkg.description {
-                        record.description = Some(desc.clone());
-                    }
+        if let Some(ref id) = installed_id {
+            if let Some(record) = self.db.get_mut(id) {
+                record.source_type = Some("apt".to_string());
+                record.registry_name = Some(source.id.clone());
+                record.recipe_id = Some(pkg.package.clone());
+                if let Some(ref desc) = pkg.description {
+                    record.description = Some(desc.clone());
                 }
-                let _ = self.db.save();
             }
+            let _ = self.db.save();
         }
 
-        Ok(installed)
+        Ok(installed_id)
     }
 
     pub async fn install_from_appimagehub(
@@ -2455,7 +2478,7 @@ architectures = ["amd64", "arm64"]
         app: &crate::drivers::appimagehub::AppImageHubPackage,
         force: bool,
         assume_yes: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         println!(
             "{} Resolving package '{}' from AppImageHub [{}]...",
             apt_prefix("INFO"),
@@ -2470,32 +2493,21 @@ architectures = ["amd64", "arm64"]
                 c(&app.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
                 c(repo, &[Colors::BOLD, Colors::BRIGHT_GREEN])
             );
-            let installed = self
+            let installed_id = self
                 .install_from_github(repo, None, force, assume_yes, Some("appimage"), false)
                 .await?;
-            if installed {
-                let found_id = if self.db.get(&app.id).is_some() {
-                    Some(app.id.clone())
-                } else {
-                    self.db
-                        .all()
-                        .iter()
-                        .find(|p| p.name.eq_ignore_ascii_case(&app.name) || p.id.eq_ignore_ascii_case(&app.id))
-                        .map(|p| p.id.clone())
-                };
-                if let Some(id) = found_id {
-                    if let Some(record) = self.db.get_mut(&id) {
-                        record.source_type = Some("appimagehub".to_string());
-                        record.registry_name = Some(source.id.clone());
-                        record.recipe_id = Some(app.id.clone());
-                        if let Some(ref desc) = app.description {
-                            record.description = Some(desc.clone());
-                        }
+            if let Some(ref id) = installed_id {
+                if let Some(record) = self.db.get_mut(id) {
+                    record.source_type = Some("appimagehub".to_string());
+                    record.registry_name = Some(source.id.clone());
+                    record.recipe_id = Some(app.id.clone());
+                    if let Some(ref desc) = app.description {
+                        record.description = Some(desc.clone());
                     }
                     let _ = self.db.save();
                 }
             }
-            return Ok(installed);
+            return Ok(installed_id);
         }
 
         if let Some(ref dl_url) = app.download_url {
@@ -2507,7 +2519,7 @@ architectures = ["amd64", "arm64"]
 
             self.download_direct_url(dl_url, &target_path, &filename, None).await?;
 
-            let installed = self.install_local_file(
+            let installed_id = self.install_local_file(
                 &target_path,
                 force,
                 assume_yes,
@@ -2521,8 +2533,8 @@ architectures = ["amd64", "arm64"]
                 Some(app.id.clone()),
             )?;
 
-            if installed {
-                if let Some(record) = self.db.get_mut(&app.id) {
+            if let Some(ref id) = installed_id {
+                if let Some(record) = self.db.get_mut(id) {
                     record.source_type = Some("appimagehub".to_string());
                     record.registry_name = Some(source.id.clone());
                     record.recipe_id = Some(app.id.clone());
@@ -2532,10 +2544,290 @@ architectures = ["amd64", "arm64"]
                     let _ = self.db.save();
                 }
             }
-            return Ok(installed);
+            return Ok(installed_id);
         }
 
         Err(format!("Package '{}' on AppImageHub does not have an upstream GitHub repo or direct download URL.", app.id))
+    }
+
+    pub async fn resolve_package_dependencies(
+        &mut self,
+        app_id: &str,
+        auto_deps: bool,
+        no_deps: bool,
+        rootless_deps: bool,
+    ) -> Result<(), String> {
+        if no_deps {
+            return Ok(());
+        }
+
+        let pkg = match self.db.get(app_id) {
+            Some(p) => p.clone(),
+            None => return Ok(()),
+        };
+
+        // AppImages are self-contained with bundled libc/runtime
+        if pkg.format == "appimage" {
+            return Ok(());
+        }
+
+        println!(
+            "{} Scanning shared library dependencies for {}...",
+            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+            c(&pkg.name, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+        );
+
+        let scan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+        if scan.missing_libs.is_empty() {
+            println!(
+                " {} All shared library dependencies are satisfied.",
+                apt_prefix("OK")
+            );
+            return Ok(());
+        }
+
+        println!(
+            " {} Found {} missing shared librar{}:",
+            apt_prefix("WARN"),
+            scan.missing_libs.len(),
+            if scan.missing_libs.len() == 1 { "y" } else { "ies" }
+        );
+        for m in &scan.missing_libs {
+            println!("    - {}", c(&m.soname, &[Colors::BOLD, Colors::RED]));
+        }
+
+        let mut remaining_missing = scan.missing_libs;
+
+        if !rootless_deps {
+            if let Some(pm) = crate::deps::host::detect_host_package_manager() {
+                if let Ok(host_res) = crate::deps::host::resolve_libraries_with_host(pm, &remaining_missing) {
+                    if !host_res.resolved_packages.is_empty() {
+                        let installed = crate::deps::host::prompt_and_install_host_packages(pm, &host_res.resolved_packages, auto_deps)?;
+                        if installed {
+                            // Rescan
+                            let rescan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+                            remaining_missing = rescan.missing_libs;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !remaining_missing.is_empty() {
+            // Tier 2: Rootless Debian deb bundle resolver
+            let rootless_candidates: Vec<_> = remaining_missing
+                .iter()
+                .filter(|m| !crate::deps::is_core_host_only(&m.soname))
+                .cloned()
+                .collect();
+
+            if !rootless_candidates.is_empty() {
+                println!(
+                    "\n{} Resolving {} remaining librar{} via rootless sandbox pool...",
+                    c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                    rootless_candidates.len(),
+                    if rootless_candidates.len() == 1 { "y" } else { "ies" }
+                );
+
+                let bundled_so_files = crate::deps::rootless::resolve_rootless_libraries(
+                    &self.http_client,
+                    &self.config.cache_dir,
+                    &pkg.install_dir,
+                    &rootless_candidates,
+                ).await?;
+
+                if !bundled_so_files.is_empty() {
+                    // Update launcher scripts to include LD_LIBRARY_PATH
+                    for b in &pkg.binaries {
+                        let _ = crate::deps::rootless::update_launcher_ld_path(b, &pkg.install_dir);
+                    }
+
+                    // Update package record bundled_deps in DB
+                    if let Some(record) = self.db.get_mut(app_id) {
+                        for so in &bundled_so_files {
+                            if !record.bundled_deps.contains(so) {
+                                record.bundled_deps.push(so.clone());
+                            }
+                        }
+                        let _ = self.db.save();
+                    }
+                }
+            }
+
+            // Final check
+            let final_scan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+            if final_scan.missing_libs.is_empty() {
+                println!(
+                    "\n {} All dependencies successfully resolved.",
+                    apt_prefix("OK")
+                );
+            } else {
+                let host_only_missing: Vec<_> = final_scan
+                    .missing_libs
+                    .iter()
+                    .filter(|m| crate::deps::is_core_host_only(&m.soname))
+                    .collect();
+
+                if !host_only_missing.is_empty() {
+                    println!(
+                        "\n {} Core host librar{} must be installed via your system package manager:",
+                        apt_prefix("FAIL"),
+                        if host_only_missing.len() == 1 { "y" } else { "ies" }
+                    );
+                    for m in &host_only_missing {
+                        println!("    - {}", c(&m.soname, &[Colors::BOLD, Colors::RED]));
+                    }
+                }
+            }
+        } else {
+            println!(
+                "\n {} All dependencies successfully resolved.",
+                apt_prefix("OK")
+            );
+        }
+
+        Ok(())
+    }
+
+    pub async fn deps_manage(
+        &mut self,
+        app_id: Option<String>,
+        all: bool,
+        fix: bool,
+        auto_deps: bool,
+        rootless_deps: bool,
+    ) -> Result<(), String> {
+        if all {
+            let pkgs: Vec<PackageRecord> = self.db.all().into_iter().cloned().collect();
+            if pkgs.is_empty() {
+                println!("{} No packages installed.", apt_prefix("INFO"));
+                return Ok(());
+            }
+
+            println!(
+                "{} Checking shared library dependencies for all installed packages...\n",
+                c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE])
+            );
+
+            let mut any_missing = false;
+            for p in &pkgs {
+                if p.format == "appimage" {
+                    continue;
+                }
+                let scan = crate::deps::scan_app_dependencies(&p.install_dir);
+                if !scan.missing_libs.is_empty() {
+                    any_missing = true;
+                    println!(
+                        "{} {} ({}) - {} missing librar{}:",
+                        apt_prefix("WARN"),
+                        c(&p.name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                        p.id,
+                        scan.missing_libs.len(),
+                        if scan.missing_libs.len() == 1 { "y" } else { "ies" }
+                    );
+                    for m in &scan.missing_libs {
+                        println!("    - {}", c(&m.soname, &[Colors::RED]));
+                    }
+                    if fix {
+                        self.resolve_package_dependencies(&p.id, auto_deps, false, rootless_deps).await?;
+                        println!();
+                    }
+                }
+            }
+
+            if !any_missing {
+                println!(
+                    "{} All installed application shared libraries are satisfied.\n",
+                    apt_prefix("OK")
+                );
+            } else if !fix {
+                println!(
+                    "\nTip: Run {} to automatically resolve missing dependencies.\n",
+                    c("appmgr deps --all --fix", &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                );
+            }
+            return Ok(());
+        }
+
+        let id = match app_id {
+            Some(i) => i,
+            None => {
+                println!(
+                    "{} Please specify a package ID or use --all.",
+                    apt_prefix("FAIL")
+                );
+                return Ok(());
+            }
+        };
+
+        let pkg = match self.db.get(&id) {
+            Some(p) => p.clone(),
+            None => {
+                println!(
+                    "{} Package '{}' is not installed.",
+                    apt_prefix("FAIL"),
+                    id
+                );
+                return Ok(());
+            }
+        };
+
+        if pkg.format == "appimage" {
+            println!(
+                "{} Package '{}' is an AppImage (self-contained runtime).",
+                apt_prefix("INFO"),
+                pkg.id
+            );
+            return Ok(());
+        }
+
+        let scan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+        println!(
+            "{} Dependency report for {}:\n",
+            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+            c(&pkg.name, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+        );
+
+        if !pkg.bundled_deps.is_empty() {
+            println!(
+                "  Bundled rootless dependencies in deps/lib/ ({}):",
+                pkg.bundled_deps.len()
+            );
+            for b in &pkg.bundled_deps {
+                println!("    {} {}", c("•", &[Colors::BRIGHT_GREEN]), b);
+            }
+            println!();
+        }
+
+        if scan.missing_libs.is_empty() {
+            println!(
+                " {} All dynamic shared library dependencies are satisfied.\n",
+                apt_prefix("OK")
+            );
+            return Ok(());
+        }
+
+        println!(
+            " {} Found {} missing shared librar{}:",
+            apt_prefix("WARN"),
+            scan.missing_libs.len(),
+            if scan.missing_libs.len() == 1 { "y" } else { "ies" }
+        );
+        for m in &scan.missing_libs {
+            println!("    - {}", c(&m.soname, &[Colors::BOLD, Colors::RED]));
+        }
+        println!();
+
+        if fix {
+            self.resolve_package_dependencies(&pkg.id, auto_deps, false, rootless_deps).await?;
+        } else {
+            println!(
+                "Tip: Run {} to automatically resolve missing dependencies.\n",
+                c(&format!("appmgr deps {} --fix", pkg.id), &[Colors::BOLD, Colors::BRIGHT_CYAN])
+            );
+        }
+
+        Ok(())
     }
 }
 

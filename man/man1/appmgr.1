@@ -1,4 +1,4 @@
-.TH APPMGR 1 "November 2026" "appmgr 2.1.0" "User Commands"
+.TH APPMGR 1 "November 2026" "appmgr 2.2.0" "User Commands"
 .SH NAME
 appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with Package Registry and GitHub integration
 .SH SYNOPSIS
@@ -9,14 +9,18 @@ appmgr \- Universal application combine for .deb, .AppImage, binary archives (.t
 is a hybrid package management combine that brings the aesthetics and animations of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v1 TOML recipes, direct downloads, HTTP 302 redirects, GitLab releases, GitHub Search and Releases APIs, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
 .SH COMMANDS
 .TP
-\fBinstall\fR, \fBi\fR \fITARGET\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR]
+\fBinstall\fR, \fBi\fR \fITARGET\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR]
 Installs a package with automatic target detection:
 1. If \fITARGET\fR is an existing local file (.deb, .AppImage, .tar.*, .zip, or standalone ELF binary), installs it locally.
 2. If \fITARGET\fR ends with \fB.toml\fR, parses and installs directly from the declarative recipe.
 3. If \fITARGET\fR matches a package ID in active registries, installs according to the recipe's source configuration.
 4. If \fITARGET\fR is a URL, \fBgithub:owner/repo[@tag]\fR, or in \fBowner/repo[@tag]\fR format, installs directly from GitHub Releases.
 5. Otherwise, treats \fITARGET\fR as an application name and searches GitHub repositories, presenting an interactive selection menu.
-Automatically filters assets by host architecture, validates SHA-256 checksums if available, cleans launcher names, and sets up desktop integration.
+Automatically filters assets by host architecture, validates SHA-256 checksums if available, cleans launcher names, sets up desktop integration, and performs automatic 2-tier shared library dependency resolution (host package manager + rootless sandbox pool).
+.TP
+\fBdeps\fR [\fIAPP\fR] [\fI--all\fR] [\fI--fix\fR] [\fI--auto-deps\fR] [\fI--rootless-deps\fR]
+Inspects or repairs dynamic shared library (.so) dependencies for installed applications.
+With \fI--fix\fR, automatically resolves missing dependencies via native host packages (Tier 1) or downloads rootless library bundles into the application's isolated sandbox (Tier 2).
 .TP
 \fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR [\fI--offline\fR]
 Searches local package registry databases and upstream GitHub repositories for applications matching \fIQUERY\fR.

@@ -63,6 +63,8 @@ pub struct PackageRecord {
     pub bwrap: Option<bool>,
     #[serde(default)]
     pub bind_opt: Option<Vec<String>>,
+    #[serde(default)]
+    pub bundled_deps: Vec<String>,
 }
 
 impl Default for PackageRecord {
@@ -97,6 +99,7 @@ impl Default for PackageRecord {
             default_args: None,
             bwrap: None,
             bind_opt: None,
+            bundled_deps: Vec::new(),
         }
     }
 }
@@ -329,5 +332,6 @@ mod tests {
         assert_eq!(btop.default_args, None);
         assert_eq!(btop.bwrap, None);
         assert_eq!(btop.bind_opt, None);
+        assert_eq!(btop.bundled_deps, Vec::<String>::new());
     }
 }

@@ -60,6 +60,15 @@ pub enum Commands {
 
         #[arg(long = "pre", help = "Allow pre-release versions")]
         pre: bool,
+
+        #[arg(long = "auto-deps", help = "Automatically install missing host dependencies")]
+        auto_deps: bool,
+
+        #[arg(long = "no-deps", help = "Skip dynamic dependency check and resolution")]
+        no_deps: bool,
+
+        #[arg(long = "rootless-deps", help = "Bundle missing libraries into local sandbox (no sudo)")]
+        rootless_deps: bool,
     },
 
     #[command(
@@ -97,6 +106,24 @@ pub enum Commands {
     Source {
         #[command(subcommand)]
         command: SourceCommands,
+    },
+
+    #[command(about = "Diagnose and repair shared library dependencies for installed applications")]
+    Deps {
+        #[arg(help = "Application ID to check")]
+        app: Option<String>,
+
+        #[arg(long = "all", help = "Check dependencies for all installed applications")]
+        all: bool,
+
+        #[arg(long = "fix", help = "Resolve and install missing dependencies")]
+        fix: bool,
+
+        #[arg(long = "auto-deps", help = "Automatically confirm host package installation")]
+        auto_deps: bool,
+
+        #[arg(long = "rootless-deps", help = "Bundle missing libraries into local sandbox (no sudo)")]
+        rootless_deps: bool,
     },
 
     #[command(about = "Maintainer tools for recipe creation, linting, and testing")]

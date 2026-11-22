@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod core;
 mod db;
+mod deps;
 mod desktop;
 mod doctor;
 mod drivers;
@@ -71,6 +72,9 @@ async fn main() {
             repo,
             prefer,
             pre,
+            auto_deps,
+            no_deps,
+            rootless_deps,
         } => {
             core.install(
                 &package,
@@ -79,6 +83,9 @@ async fn main() {
                 repo,
                 prefer.map(|p| p.as_str()),
                 pre,
+                auto_deps,
+                no_deps,
+                rootless_deps,
             )
             .await
             .map(|_| ())
@@ -89,6 +96,15 @@ async fn main() {
         Commands::Update => core.sync_databases().await,
         Commands::Repo { command } => core.repo_manage(command),
         Commands::Source { command } => core.source_manage(command).await,
+        Commands::Deps {
+            app,
+            all,
+            fix,
+            auto_deps,
+            rootless_deps,
+        } => {
+            core.deps_manage(app, all, fix, auto_deps, rootless_deps).await
+        }
         Commands::Pkg { command } => core.pkg_manage(command).await,
         Commands::Link { app, repo } => core.link(&app, &repo).await.map(|_| ()),
         Commands::Upgrade {

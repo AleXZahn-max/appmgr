@@ -41,6 +41,9 @@ _arguments "${_arguments_options[@]}" : \
 '-y[Assume yes to prompts]' \
 '--yes[Assume yes to prompts]' \
 '--pre[Allow pre-release versions]' \
+'--auto-deps[Automatically install missing host dependencies]' \
+'--no-deps[Skip dynamic dependency check and resolution]' \
+'--rootless-deps[Bundle missing libraries into local sandbox (no sudo)]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
@@ -265,6 +268,21 @@ esac
         esac
     ;;
 esac
+;;
+(deps)
+_arguments "${_arguments_options[@]}" : \
+'--all[Check dependencies for all installed applications]' \
+'--fix[Resolve and install missing dependencies]' \
+'--auto-deps[Automatically confirm host package installation]' \
+'--rootless-deps[Bundle missing libraries into local sandbox (no sudo)]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::app -- Application ID to check:_default' \
+&& ret=0
 ;;
 (pkg)
 _arguments "${_arguments_options[@]}" : \
@@ -654,6 +672,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(deps)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (pkg)
 _arguments "${_arguments_options[@]}" : \
 ":: :_appmgr__subcmd__help__subcmd__pkg_commands" \
@@ -775,6 +797,7 @@ _appmgr_commands() {
 'update:Synchronize package databases from configured sources' \
 'repo:Manage software sources and repositories in sources.list' \
 'source:Validate and test source definitions (Schema v2)' \
+'deps:Diagnose and repair shared library dependencies for installed applications' \
 'pkg:Maintainer tools for recipe creation, linting, and testing' \
 'link:Link an installed application to a GitHub repository for updates' \
 'upgrade:Check and upgrade packages from GitHub Releases and registries' \
@@ -813,6 +836,11 @@ _appmgr__subcmd__completions_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr completions commands' commands "$@"
 }
+(( $+functions[_appmgr__subcmd__deps_commands] )) ||
+_appmgr__subcmd__deps_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr deps commands' commands "$@"
+}
 (( $+functions[_appmgr__subcmd__doctor_commands] )) ||
 _appmgr__subcmd__doctor_commands() {
     local commands; commands=()
@@ -836,6 +864,7 @@ _appmgr__subcmd__help_commands() {
 'update:Synchronize package databases from configured sources' \
 'repo:Manage software sources and repositories in sources.list' \
 'source:Validate and test source definitions (Schema v2)' \
+'deps:Diagnose and repair shared library dependencies for installed applications' \
 'pkg:Maintainer tools for recipe creation, linting, and testing' \
 'link:Link an installed application to a GitHub repository for updates' \
 'upgrade:Check and upgrade packages from GitHub Releases and registries' \
@@ -873,6 +902,11 @@ _appmgr__subcmd__help__subcmd__clean_commands() {
 _appmgr__subcmd__help__subcmd__completions_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr help completions commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__deps_commands] )) ||
+_appmgr__subcmd__help__subcmd__deps_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help deps commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__help__subcmd__doctor_commands] )) ||
 _appmgr__subcmd__help__subcmd__doctor_commands() {

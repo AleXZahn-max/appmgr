@@ -189,64 +189,52 @@ impl Doctor {
 
     pub fn check_shared_libraries(&self) {
         let installed = self.db.all();
-        let mut missing_all = Vec::new();
-        let mut has_dynamic = false;
-        let mut total_elfs = 0;
+        let mut missing_map: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
 
         for pkg in &installed {
-            let app_dir = &pkg.install_dir;
-            if app_dir.exists() {
-                for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
-                    let p = entry.path();
-                    if p.is_file()
-                        && crate::formats::archive::ArchivePackage::is_executable_file(p)
-                    {
-                        total_elfs += 1;
-                        if let Ok(output) = Command::new("ldd").arg(p).output() {
-                            let combined = format!(
-                                "{}\n{}",
-                                String::from_utf8_lossy(&output.stdout),
-                                String::from_utf8_lossy(&output.stderr)
-                            );
-                            let lower = combined.to_lowercase();
-                            if lower.contains("not a dynamic executable")
-                                || lower.contains("statically linked")
-                            {
-                                continue;
-                            }
-                            has_dynamic = true;
-                            for line in combined.lines() {
-                                if line.contains("not found") {
-                                    if let Some((lib, _)) = line.split_once("=>") {
-                                        missing_all.push(lib.trim().to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if pkg.format == "appimage" {
+                continue;
+            }
+            if pkg.install_dir.exists() {
+                let scan = crate::deps::scan_app_dependencies(&pkg.install_dir);
+                if !scan.missing_libs.is_empty() {
+                    let libs = scan.missing_libs.into_iter().map(|m| m.soname).collect();
+                    missing_map.insert(pkg.id.clone(), libs);
                 }
             }
         }
 
-        if total_elfs > 0 && !has_dynamic {
-            println!(
-                " {} All checked binaries are [static binary] (no external shared library dependencies)",
-                apt_prefix("OK")
-            );
-        } else if missing_all.is_empty() {
+        if missing_map.is_empty() {
             println!(
                 " {} All inspected application shared libraries are satisfied",
                 apt_prefix("OK")
             );
         } else {
+            let total_missing: usize = missing_map.values().map(|v| v.len()).sum();
             println!(
-                " {} Found {} missing shared library references across installed apps:",
+                " {} Found {} missing shared library references across {} installed application(s):",
                 apt_prefix("WARN"),
-                missing_all.len()
+                total_missing,
+                missing_map.len()
             );
-            for m in missing_all.iter().take(3) {
-                println!("        - {}", c(m, &[Colors::BOLD, Colors::RED]));
+            for (app_id, libs) in missing_map.iter().take(3) {
+                let preview = libs.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                let extra = if libs.len() > 3 {
+                    format!(" (+{} more)", libs.len() - 3)
+                } else {
+                    String::new()
+                };
+                println!(
+                    "        - {}: {}{}",
+                    c(app_id, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                    c(&preview, &[Colors::RED]),
+                    extra
+                );
             }
+            println!(
+                "        Run {} to automatically diagnose and resolve them.",
+                c("appmgr deps --all --fix", &[Colors::BOLD, Colors::BRIGHT_CYAN])
+            );
         }
     }
 

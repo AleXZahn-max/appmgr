@@ -140,7 +140,7 @@ impl BinaryPackage {
 # Wrapper created by appmgr for {pkg_id} (Standalone binary)
 APP_ROOT="{app_dir}"
 export PATH="$APP_ROOT/bin:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/lib:${{LD_LIBRARY_PATH}}"{env_block}
+export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/lib:${{LD_LIBRARY_PATH}}"{env_block}
 {args_block}
 exec "$APP_ROOT/bin/{pkg_id}" "${{PERSISTENT_ARGS[@]}}" "$@"
 "#,
