@@ -1,0 +1,102 @@
+# Bash completion for appmgr
+
+_appmgr_completions()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="install search remove list info doctor run update-db link upgrade env args pin unpin rollback clean export import"
+
+    if [[ $cword -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
+        return 0
+    fi
+
+    local installed_apps=""
+    if [[ -f "$HOME/.local/share/appmgr/installed.json" ]]; then
+        installed_apps=$(grep -o '"id": "[^"]*"' "$HOME/.local/share/appmgr/installed.json" 2>/dev/null | cut -d'"' -f4)
+    fi
+
+    case "${words[1]}" in
+        install|i|in)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--yes -y --force -f --user --system --repo --prefer --pre" -- "${cur}") )
+            elif [[ "${prev}" == "--prefer" ]]; then
+                COMPREPLY=( $(compgen -W "appimage deb tar zip bin" -- "${cur}") )
+            else
+                _filedir '@(deb|AppImage|appimage|tar.xz|tar.zst|tar.gz|tgz|tar.bz2|txz|tzst|tar|zip)'
+            fi
+            ;;
+        link)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            fi
+            ;;
+        upgrade|up|update)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--check -c --yes -y --force -f --prefer --pre --json --user --system" -- "${cur}") )
+            elif [[ "${prev}" == "--prefer" ]]; then
+                COMPREPLY=( $(compgen -W "appimage deb tar zip bin" -- "${cur}") )
+            else
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            fi
+            ;;
+        remove|rm|uninstall|purge)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+            else
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            fi
+            ;;
+        list|ls)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--type -t --json" -- "${cur}") )
+            elif [[ "${prev}" == "--type" || "${prev}" == "-t" ]]; then
+                COMPREPLY=( $(compgen -W "deb appimage tar zip bin" -- "${cur}") )
+            fi
+            ;;
+        env)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            elif [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--unset --list -l" -- "${cur}") )
+            fi
+            ;;
+        args)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            elif [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--clear --list -l" -- "${cur}") )
+            fi
+            ;;
+        pin|unpin|rollback)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            elif [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+            fi
+            ;;
+        clean)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+            fi
+            ;;
+        export)
+            _filedir 'json'
+            ;;
+        import)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--yes -y" -- "${cur}") )
+            else
+                _filedir 'json'
+            fi
+            ;;
+        info|run)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "${installed_apps}" -- "${cur}") )
+            fi
+            ;;
+    esac
+}
+
+complete -F _appmgr_completions appmgr

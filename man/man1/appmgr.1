@@ -1,0 +1,83 @@
+.TH APPMGR 1 "November 2026" "appmgr 1.4.0" "User Commands"
+.SH NAME
+appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with GitHub integration
+.SH SYNOPSIS
+.B appmgr
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS...\fR]
+.SH DESCRIPTION
+.B appmgr
+is a hybrid package management combine that brings the aesthetics and animations of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It also includes direct integration with GitHub Search API and Releases API, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
+.SH COMMANDS
+.TP
+\fBinstall\fR, \fBi\fR \fITARGET\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR]
+Installs a package with automatic target detection:
+1. If \fITARGET\fR is an existing local file (.deb, .AppImage, .tar.*, .zip, or standalone ELF binary), installs it locally.
+2. If \fITARGET\fR is a URL, \fBgithub:owner/repo[@tag]\fR, or in \fBowner/repo[@tag]\fR format, installs directly from GitHub Releases.
+3. Otherwise, treats \fITARGET\fR as an application name and searches GitHub repositories, presenting an interactive selection menu.
+Automatically filters assets by host architecture, validates SHA-256 checksums if available, and sets up launchers and desktop integration.
+.TP
+\fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR
+Searches GitHub repositories for applications matching \fIQUERY\fR via the GitHub Search API (sorted by stars), displaying repository name, star count, and description.
+.TP
+\fBlink\fR \fIAPP\fR \fIOWNER/REPO\fR
+Links an existing installed application to a GitHub repository to track future releases and updates.
+.TP
+\fBupgrade\fR, \fBupdate\fR [\fIAPP\fR] [\fI--check\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI--force\fR] [\fI--json\fR] [\fI-y\fR]
+Checks for newer releases across linked GitHub repositories using concurrent multithreading (ThreadPoolExecutor) and ETag caching (304 Not Modified). Downloads updates with Pacman animation, verifies SHA-256, preserves custom env vars, persistent launch args, and version pin status, and stores a rollback backup.
+.TP
+\fBrollback\fR \fIAPP\fR [\fI-y\fR]
+Restores the previous version of an application from the local rollback cache, restoring files, launchers, shortcuts, and metadata.
+.TP
+\fBclean\fR [\fI-y\fR]
+Cleans up the rollback cache, temporary downloads, and orphaned directories, reporting total freed disk space.
+.TP
+\fBenv\fR \fIAPP\fR [\fIKEY=VALUE ...\fR] [\fI--unset KEY\fR] [\fI--list\fR]
+Manages custom environment variables for an application and regenerates its launcher wrapper.
+.TP
+\fBargs\fR \fIAPP\fR [\fIFLAGS ...\fR] [\fI--clear\fR] [\fI--list\fR]
+Configures persistent CLI arguments for an application that are automatically passed on every launch.
+.TP
+\fBpin\fR \fIAPP\fR
+Freezes an application to its current version, preventing general upgrades from modifying it.
+.TP
+\fBunpin\fR \fIAPP\fR
+Unfreezes an application, re-enabling automatic updates during upgrade.
+.TP
+\fBexport\fR [\fIFILE.json\fR]
+Exports all installed applications, formats, repository links, env vars, and launch flags into a JSON manifest file.
+.TP
+\fBimport\fR \fIFILE.json\fR [\fI-y\fR]
+Reads a JSON manifest file, installs missing applications from GitHub, applies their pin, env, and args, and lists any local-only packages requiring manual reinstallation.
+.TP
+\fBremove\fR, \fBrm\fR, \fBuninstall\fR \fINAME\fR [\fI-y\fR]
+Uninstalls an application, removing all files, launchers, icons, and desktop entries.
+.TP
+\fBlist\fR, \fBls\fR [\fI--type TYPE\fR] [\fI--json\fR]
+Displays a table of all managed applications, versions, formats ([DEB], [APPIMAGE], [TAR], [ZIP], [BIN]), pinned status, and installed sizes.
+.TP
+\fBinfo\fR \fITARGET\fR
+Displays metadata, installed location, launch commands, GitHub repository status, and performs shared library (ldd) dependency verification (with explicit [static binary] handling).
+.TP
+\fBdoctor\fR, \fBcheck\fR
+Runs a comprehensive system diagnostic: checks archive tools (tar, xz, zstd), FUSE status, Bubblewrap virtualization, PATH integrity, desktop indexers, broken launchers, and static/dynamic binary dependencies.
+.TP
+\fBrun\fR \fINAME\fR [\fIARGS...\fR]
+Launches an application with its configured environment and persistent arguments.
+.TP
+\fBupdate-db\fR
+Forces update of desktop menu databases and icon theme caches.
+.SH OPTIONS
+.TP
+\fB-y\fR, \fB--yes\fR, \fB--noconfirm\fR
+Assume yes to all prompts and non-interactively select the default choices.
+.TP
+\fB--user\fR
+Install into user home directory (~/.local) without requiring root/sudo privileges.
+.TP
+\fB--system\fR
+Install system-wide into /opt/appmgr/apps and /usr/local/bin (requires root/sudo).
+.TP
+\fB-v\fR, \fB--version\fR
+Show version and exit.
+.SH AUTHORS
+Alex Zahn

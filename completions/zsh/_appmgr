@@ -1,0 +1,118 @@
+#compdef appmgr
+
+_appmgr() {
+    local -a commands
+    commands=(
+        'install:Install application locally, from GitHub, or search by name'
+        'search:Search GitHub repositories for applications'
+        'link:Link an installed application to a GitHub repository'
+        'upgrade:Check and upgrade packages from GitHub Releases'
+        'remove:Remove an installed package'
+        'list:List installed applications'
+        'info:Display metadata about a package or file'
+        'doctor:Check system integration, FUSE, and dependencies'
+        'run:Launch an installed application'
+        'env:Manage environment variables for an application'
+        'args:Manage persistent launch arguments for an application'
+        'pin:Freeze an application version to skip general upgrades'
+        'unpin:Unfreeze an application version to allow updates'
+        'rollback:Restore previous version of an application from cache'
+        'clean:Clean rollback backups and temporary cache'
+        'export:Export installed applications to a JSON manifest'
+        'import:Install applications from a JSON manifest'
+        'update-db:Refresh desktop database and icon theme caches'
+    )
+
+    _arguments -C \
+        '(-v --version)'{-v,--version}'[Show version]' \
+        '--system[Force system installation]' \
+        '--user[Force user-level installation]' \
+        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes to all prompts]' \
+        '1: :->cmd' \
+        '*:: :->args'
+
+    local installed_apps
+    if [[ -f "$HOME/.local/share/appmgr/installed.json" ]]; then
+        installed_apps=(${(f)"$(grep -o '"id": "[^"]*"' "$HOME/.local/share/appmgr/installed.json" 2>/dev/null | cut -d'"' -f4)"})
+    fi
+
+    case $state in
+        cmd)
+            _describe -t commands 'appmgr command' commands
+            ;;
+        args)
+            case $words[1] in
+                install|i|in)
+                    _arguments \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
+                        '(-f --force)'{-f,--force}'[Force reinstall]' \
+                        '--repo[Associate with GitHub repository]:repo:_guard "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$" "owner/repo"' \
+                        '--prefer[Preferred format]:format:(appimage deb tar zip bin)' \
+                        '--pre[Allow pre-releases]' \
+                        '1:package:_files -g "*.deb *.AppImage *.appimage *.tar.xz *.tar.zst *.tar.gz *.tgz *.tar.bz2 *.txz *.tzst *.tar *.zip"'
+                    ;;
+                link)
+                    _arguments \
+                        '1:app:(${installed_apps})' \
+                        '2:repo:_guard "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$" "owner/repo"'
+                    ;;
+                upgrade|up|update)
+                    _arguments \
+                        '(-c --check)'{-c,--check}'[Check for updates without installing]' \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
+                        '(-f --force)'{-f,--force}'[Force upgrade even if pinned]' \
+                        '--prefer[Preferred format]:format:(appimage deb tar zip bin)' \
+                        '--pre[Include pre-releases in update check]' \
+                        '--json[Output JSON]' \
+                        '1:app:(${installed_apps})'
+                    ;;
+                remove|rm|uninstall|purge)
+                    _arguments \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
+                        '1:app:(${installed_apps})'
+                    ;;
+                list|ls)
+                    _arguments \
+                        '(-t --type)'{-t,--type}'[Filter by format]:format:(deb appimage tar zip bin)' \
+                        '--json[Output JSON]'
+                    ;;
+                env)
+                    _arguments \
+                        '--unset[Unset variable]:key:' \
+                        '(-l --list)'{-l,--list}'[List environment variables]' \
+                        '1:app:(${installed_apps})' \
+                        '*:pairs:'
+                    ;;
+                args)
+                    _arguments \
+                        '--clear[Clear persistent arguments]' \
+                        '(-l --list)'{-l,--list}'[List persistent arguments]' \
+                        '1:app:(${installed_apps})' \
+                        '*:flags:'
+                    ;;
+                pin|unpin|rollback)
+                    _arguments \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
+                        '1:app:(${installed_apps})'
+                    ;;
+                clean)
+                    _arguments \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]'
+                    ;;
+                export)
+                    _arguments '1:file:_files -g "*.json"'
+                    ;;
+                import)
+                    _arguments \
+                        '(-y --yes --noconfirm)'{-y,--yes,--noconfirm}'[Assume yes]' \
+                        '1:file:_files -g "*.json"'
+                    ;;
+                info|run)
+                    _arguments '1:app:(${installed_apps})'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_appmgr "$@"
