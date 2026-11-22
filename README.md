@@ -175,66 +175,74 @@ makepkg -si
 
 ## Command Reference & Examples
 
-### 1. Synchronizing Package Repositories (`update`, `sync`)
-Synchronizes all active package registries configured in `~/.config/appmgr/sources.list` using ETag caching:
+### 1. Synchronizing Software Sources (`update`, `sync`)
+Synchronizes all active sources configured in `~/.config/appmgr/sources.list` (meta-registries, Debian/APT repos, AppImageHub index) using HTTP ETag / Last-Modified caching:
 ```bash
 appmgr update
 # or:
 appmgr sync
 ```
 
-### 2. Managing Package Repositories (`repo`)
-Manage third-party and custom package sources:
+### 2. Managing Software Sources & Repositories (`repo`, `sources`)
+Manage upstream APT repositories, AppImageHub, AUR endpoints, and meta-registries:
 ```bash
-# List configured repositories:
+# List configured sources (tabular overview with package counts):
 appmgr repo list
 
-# Add a new repository:
-appmgr repo add community https://example.com/appmgr-community/index.json
+# List configured sources in JSON format:
+appmgr repo list --json
 
-# Temporarily disable or enable a repository:
-appmgr repo disable community
-appmgr repo enable community
+# Add a direct APT source:
+appmgr repo add apt my-repo https://example.com/debian --suite stable --components main --priority 600
 
-# Remove a repository and purge its cache:
-appmgr repo remove community
+# Temporarily disable or re-enable a source:
+appmgr repo disable apt-vscode
+appmgr repo enable apt-vscode
+
+# Remove a source and purge its cache:
+appmgr repo remove my-repo
 ```
 
-### 3. Maintainer Recipe Tools (`pkg`)
-Create, lint, and test Schema v1 declarative package recipes:
+### 3. Source Recipe & Maintainer Tools (`source`, `pkg`)
+Validate and test Schema v2 declarative source definition recipes:
 ```bash
-# Generate a new recipe template:
-appmgr pkg new myapp -o myapp.toml
+# Lint a Schema v2 source definition:
+appmgr source lint sources/apt-gh.toml
 
-# Lint and validate recipe syntax and constraints:
-appmgr pkg lint myapp.toml
-
-# Test upstream source resolution and asset downloads (dry run):
-appmgr pkg test myapp.toml --dry-run
+# Test network reachability and index parsing for a source definition:
+appmgr source test sources/apt-gh.toml
 ```
 
 ### 4. Searching Applications (`search`)
-Search local repositories and GitHub for software:
+Search across all configured software sources (APT, AppImageHub, AUR) and GitHub:
 ```bash
-# Search repositories and GitHub:
-appmgr search btop
+# Search across all sources and GitHub:
+appmgr search vscode
 
-# Search only local cached repositories (offline):
+# Filter search results by source ID:
+appmgr search gh --source apt-gh
+
+# Filter search results by driver type (apt, appimagehub, aur, github, gitlab):
+appmgr search obsidian --driver appimagehub
+appmgr search paru --driver aur
+
+# Search only local cached repository indexes (offline):
 appmgr search ripgrep --offline
 ```
 
 ### 5. Installing Applications (`install`)
-Install packages from declarative recipes, repositories, GitHub, or local files:
+Install packages from upstream APT repositories, AppImageHub, AUR, GitHub Releases, or local files:
 ```bash
-# Install directly from official package registry:
-appmgr install discord
-appmgr install jq
+# Install with explicit source or driver prefix:
+appmgr install apt-gh:gh
+appmgr install apt-vscode:code
+appmgr install appimagehub:obsidian
+appmgr install aur:paru-bin
 
-# Install directly from a local Schema v1 recipe file:
-appmgr install ./discord.toml
-
-# Interactive GitHub repository search and install by name:
-appmgr install btop
+# Install by application name (searches configured sources by priority, then GitHub):
+appmgr install gh
+appmgr install code
+appmgr install obsidian
 
 # Install specific GitHub repository release:
 appmgr install aristocratos/btop
@@ -255,7 +263,7 @@ appmgr install ~/Downloads/ripgrep-14.1.0-x86_64-linux.tar.gz
 appmgr install ~/Downloads/tool.zip
 
 # Non-interactive mode (assumes yes):
-appmgr install btop -y
+appmgr install apt-gh:gh -y
 ```
 
 ### 6. Linking Applications to GitHub (`link`)

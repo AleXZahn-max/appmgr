@@ -4,6 +4,7 @@ mod core;
 mod db;
 mod desktop;
 mod doctor;
+mod drivers;
 mod formats;
 mod github;
 mod registry;
@@ -82,9 +83,12 @@ async fn main() {
             .await
             .map(|_| ())
         }
-        Commands::Search { query, offline } => core.search(&query, offline).await,
+        Commands::Search { query, source, driver, offline } => {
+            core.search(&query, source.as_deref(), driver.as_deref(), offline).await
+        }
         Commands::Update => core.sync_databases().await,
         Commands::Repo { command } => core.repo_manage(command),
+        Commands::Source { command } => core.source_manage(command).await,
         Commands::Pkg { command } => core.pkg_manage(command).await,
         Commands::Link { app, repo } => core.link(&app, &repo).await.map(|_| ()),
         Commands::Upgrade {

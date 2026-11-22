@@ -25,6 +25,7 @@ pub struct Config {
     pub config_dir: PathBuf,
     pub sources_list_file: PathBuf,
     pub registries_cache_dir: PathBuf,
+    pub indexes_cache_dir: PathBuf,
 }
 
 impl Config {
@@ -51,6 +52,7 @@ impl Config {
             let db_dir = PathBuf::from("/var/lib/appmgr");
             let config_dir = PathBuf::from("/etc/appmgr");
             let registries_cache_dir = PathBuf::from("/var/cache/appmgr/registries");
+            let indexes_cache_dir = PathBuf::from("/var/cache/appmgr/indexes");
             Ok(Self {
                 mode,
                 prefix: PathBuf::from("/usr/local"),
@@ -65,12 +67,14 @@ impl Config {
                 sources_list_file: config_dir.join("sources.list"),
                 config_dir,
                 registries_cache_dir,
+                indexes_cache_dir,
             })
         } else {
             let prefix = home.join(".local");
             let db_dir = prefix.join("share/appmgr");
             let config_dir = home.join(".config/appmgr");
             let registries_cache_dir = home.join(".cache/appmgr/registries");
+            let indexes_cache_dir = home.join(".cache/appmgr/indexes");
             Ok(Self {
                 mode,
                 apps_dir: db_dir.join("apps"),
@@ -85,6 +89,7 @@ impl Config {
                 sources_list_file: config_dir.join("sources.list"),
                 config_dir,
                 registries_cache_dir,
+                indexes_cache_dir,
             })
         }
     }
@@ -100,6 +105,7 @@ impl Config {
             &self.cache_dir,
             &self.config_dir,
             &self.registries_cache_dir,
+            &self.indexes_cache_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }

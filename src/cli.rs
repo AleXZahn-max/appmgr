@@ -65,11 +65,17 @@ pub enum Commands {
     #[command(
         alias = "s",
         alias = "find",
-        about = "Search package registries and GitHub for applications"
+        about = "Search package sources and online registries for applications"
     )]
     Search {
         #[arg(help = "Application name or search query")]
         query: String,
+
+        #[arg(long = "source", help = "Filter by specific source ID")]
+        source: Option<String>,
+
+        #[arg(long = "driver", help = "Filter by driver type (apt, appimagehub, aur, github, gitlab)")]
+        driver: Option<String>,
 
         #[arg(long = "offline", help = "Search only local repository cache")]
         offline: bool,
@@ -77,14 +83,20 @@ pub enum Commands {
 
     #[command(
         alias = "sync",
-        about = "Synchronize package databases from configured repositories"
+        about = "Synchronize package databases from configured sources"
     )]
     Update,
 
-    #[command(about = "Manage package repositories in sources.list")]
+    #[command(alias = "sources", about = "Manage software sources and repositories in sources.list")]
     Repo {
         #[command(subcommand)]
         command: RepoCommands,
+    },
+
+    #[command(about = "Validate and test source definitions (Schema v2)")]
+    Source {
+        #[command(subcommand)]
+        command: SourceCommands,
     },
 
     #[command(about = "Maintainer tools for recipe creation, linting, and testing")]
@@ -268,13 +280,24 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum RepoCommands {
     #[command(about = "List configured repositories in sources.list")]
-    List,
+    List {
+        #[arg(long = "json", help = "Output machine-readable JSON")]
+        json: bool,
+    },
     #[command(about = "Add a repository to sources.list")]
     Add {
-        #[arg(help = "Repository identifier (e.g. core, community)")]
+        #[arg(help = "Driver or registry type (apt, appimagehub, aur, github, gitlab, registry)")]
+        driver: String,
+        #[arg(help = "Repository identifier (e.g. core, my-apt)")]
         id: String,
-        #[arg(help = "Repository index URL or local file path")]
+        #[arg(help = "Repository URL or index endpoint")]
         url: String,
+        #[arg(long = "suite", help = "Debian suite / distribution branch (for apt)")]
+        suite: Option<String>,
+        #[arg(long = "components", help = "Debian components (for apt)")]
+        components: Option<String>,
+        #[arg(long = "priority", help = "Priority ranking (0..1000)")]
+        priority: Option<i32>,
     },
     #[command(about = "Remove a repository from sources.list and delete its cache")]
     Remove {
@@ -290,6 +313,20 @@ pub enum RepoCommands {
     Disable {
         #[arg(help = "Repository identifier to disable")]
         id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SourceCommands {
+    #[command(about = "Lint and validate a source definition TOML against Schema v2")]
+    Lint {
+        #[arg(help = "Path to source TOML file")]
+        file: String,
+    },
+    #[command(about = "Test source endpoint reachability and index access")]
+    Test {
+        #[arg(help = "Path to source TOML file")]
+        file: String,
     },
 }
 

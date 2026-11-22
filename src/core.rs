@@ -19,22 +19,6 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn recipe_to_registry_package(r: &crate::registry::Recipe) -> crate::registry::RegistryPackage {
-    crate::registry::RegistryPackage {
-        id: r.package.id.clone(),
-        name: r.package.name.clone(),
-        description: r.package.description.clone(),
-        homepage: r.package.homepage.clone(),
-        license: r.package.license.clone(),
-        categories: r.package.categories.clone(),
-        format: r.package.format.clone(),
-        bin_name: r.package.bin_name.clone(),
-        gui: r.package.gui,
-        source: r.source.clone(),
-        runtime: r.runtime.clone(),
-        sandbox: r.sandbox.clone(),
-    }
-}
 
 pub struct Core {
     pub config: Config,
@@ -71,12 +55,18 @@ impl Core {
         let local_path = Path::new(target_str);
         if local_path.is_file() {
             if target_str.ends_with(".toml") {
-                let recipe = crate::registry::pkg_lint(local_path)
-                    .map_err(|errs| format!("Recipe linting error:\n{}", errs.join("\n")))?;
-                let pkg = recipe_to_registry_package(&recipe);
-                return self
-                    .install_from_registry_package("local", &pkg, force, assume_yes, prefer, include_pre)
-                    .await;
+                if let Ok(recipe) = crate::registry::source_lint(local_path) {
+                    println!(
+                        "{} '{}' is a valid Source Definition (Schema v2).",
+                        apt_prefix("INFO"),
+                        recipe.source.id
+                    );
+                    println!(
+                        "   To add it to sources: appmgr repo add {} {} {}",
+                        recipe.source.driver, recipe.source.id, recipe.source.base_url
+                    );
+                    return Ok(false);
+                }
             }
             return self.install_local_file(
                 local_path,
@@ -93,16 +83,55 @@ impl Core {
             );
         }
 
-        // Check if target matches a package in any active registry
-        let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
-        if let Some((repo_name, pkg)) = crate::registry::find_package_in_registries(
+        let effective_sources = crate::registry::get_effective_sources(
+            &self.config.sources_list_file,
             &self.config.registries_cache_dir,
-            &sources,
-            target_str,
-        ) {
-            return self
-                .install_from_registry_package(&repo_name, &pkg, force, assume_yes, prefer, include_pre)
-                .await;
+        );
+
+        // Check for explicit prefix: <source_id>:<pkg> or <driver>:<pkg>
+        if let Some((prefix, pkg_name)) = target_str.split_once(':') {
+            if !target_str.starts_with("http://") && !target_str.starts_with("https://") {
+                if prefix == "aur" {
+                    let rpc_url = effective_sources
+                        .iter()
+                        .find(|s| s.driver == "aur")
+                        .map(|s| s.url.as_str())
+                        .unwrap_or("https://aur.archlinux.org/rpc/v5");
+                    if let Some(info) = crate::drivers::aur::get_aur_info(&self.http_client, rpc_url, pkg_name).await? {
+                        return crate::drivers::aur::install_aur_package(&self.http_client, &info, assume_yes).await;
+                    } else {
+                        return Err(format!("Package '{}' not found in AUR.", pkg_name));
+                    }
+                }
+
+                // Match specific source by ID or by driver
+                for src in &effective_sources {
+                    if !src.enabled {
+                        continue;
+                    }
+                    if src.id.eq_ignore_ascii_case(prefix) || src.driver.eq_ignore_ascii_case(prefix) {
+                        match src.driver.as_str() {
+                            "apt" => {
+                                let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                                let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
+                                if let Some(p) = pkgs.get(pkg_name) {
+                                    return self.install_from_apt_source(src, p, force, assume_yes).await;
+                                }
+                            }
+                            "appimagehub" => {
+                                let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                                let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
+                                if let Some(p) = pkgs.get(pkg_name).or_else(|| pkgs.values().find(|v| v.name.eq_ignore_ascii_case(pkg_name))) {
+                                    return self.install_from_appimagehub(src, p, force, assume_yes).await;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                return Err(format!("Package '{}' not found under source prefix '{}'.", pkg_name, prefix));
+            }
         }
 
         let (parsed_repo, tag) = GitHubClient::parse_repo_and_tag(target_str);
@@ -123,6 +152,38 @@ impl Core {
                     include_pre,
                 )
                 .await;
+        }
+
+        // Search local indexed packages (APT, AppImageHub) by priority
+        for src in &effective_sources {
+            if !src.enabled {
+                continue;
+            }
+            match src.driver.as_str() {
+                "apt" => {
+                    let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                    let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
+                    if let Some(p) = pkgs.get(target_str) {
+                        return self.install_from_apt_source(src, p, force, assume_yes).await;
+                    }
+                }
+                "appimagehub" => {
+                    let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                    let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
+                    if let Some(p) = pkgs.get(target_str).or_else(|| pkgs.values().find(|v| v.name.eq_ignore_ascii_case(target_str))) {
+                        return self.install_from_appimagehub(src, p, force, assume_yes).await;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Online search fallback (AUR)
+        let aur_src = effective_sources.iter().find(|s| s.enabled && s.driver == "aur");
+        if let Some(asrc) = aur_src {
+            if let Ok(Some(ainfo)) = crate::drivers::aur::get_aur_info(&self.http_client, &asrc.url, target_str).await {
+                return crate::drivers::aur::install_aur_package(&self.http_client, &ainfo, assume_yes).await;
+            }
         }
 
         self.search_and_install(target_str, force, assume_yes, prefer, include_pre)
@@ -544,42 +605,60 @@ impl Core {
         Ok(true)
     }
 
-    pub async fn search(&self, query: &str, offline: bool) -> Result<(), String> {
-        let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
-        let registry_matches = crate::registry::search_registries(
+    pub async fn search(
+        &self,
+        query: &str,
+        filter_source: Option<&str>,
+        filter_driver: Option<&str>,
+        offline: bool,
+    ) -> Result<(), String> {
+        let matches = crate::registry::search_all_sources(
+            &self.http_client,
+            &self.config.sources_list_file,
             &self.config.registries_cache_dir,
-            &sources,
+            &self.config.indexes_cache_dir,
             query,
-        );
+            filter_source,
+            filter_driver,
+            offline,
+        )
+        .await;
 
-        if !registry_matches.is_empty() {
+        if !matches.is_empty() {
             println!(
-                "\n{} Found {} package(s) in repositories for '{}':\n",
+                "\n{} Found {} package(s) matching '{}':\n",
                 c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-                registry_matches.len(),
+                matches.len(),
                 c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
             );
 
-            let headers = ["REPO", "PACKAGE ID", "FORMAT", "NAME", "DESCRIPTION"];
+            let headers = ["SOURCE", "DRIVER", "PACKAGE ID", "FORMAT", "VERSION", "DESCRIPTION"];
             let mut rows = Vec::new();
 
-            for (repo, pkg) in &registry_matches {
+            for m in &matches {
+                let pkg_display = if !m.name.is_empty() && !m.name.eq_ignore_ascii_case(&m.package_id) {
+                    format!("{} ({})", m.package_id, m.name)
+                } else {
+                    m.package_id.clone()
+                };
                 rows.push(vec![
-                    format!("[{}]", repo),
-                    c(&pkg.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
-                    format!("[{}]", pkg.format.to_uppercase()),
-                    pkg.name.clone(),
-                    pkg.description.clone(),
+                    format!("[{}]", m.source_id),
+                    format!("[{}]", m.driver.to_uppercase()),
+                    c(&pkg_display, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                    format!("[{}]", m.format.to_uppercase()),
+                    m.version.clone(),
+                    m.description.clone(),
                 ]);
             }
 
             print_table(&headers, &rows);
+            println!();
         }
 
         if offline {
-            if registry_matches.is_empty() {
+            if matches.is_empty() {
                 println!(
-                    "{} No packages matching '{}' found in repositories (offline mode).",
+                    "{} No packages matching '{}' found in configured sources (offline mode).",
                     apt_prefix("INFO"),
                     query
                 );
@@ -587,50 +666,48 @@ impl Core {
             return Ok(());
         }
 
-        println!(
-            "{} Searching GitHub for '{}'...",
-            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-            c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
-        );
+        if matches.is_empty() {
+            println!(
+                "{} Searching GitHub for '{}'...",
+                c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+            );
 
-        let spinner = Spinner::new(&format!("Querying GitHub Search API for '{}'...", query));
-        let repos_res = self.github.search_repositories(query, 8).await;
-        spinner.stop();
+            let spinner = Spinner::new(&format!("Querying GitHub Search API for '{}'...", query));
+            let repos_res = self.github.search_repositories(query, 8).await;
+            spinner.stop();
 
-        match repos_res {
-            Ok(repos) => {
-                if repos.is_empty() {
-                    if registry_matches.is_empty() {
+            match repos_res {
+                Ok(repos) => {
+                    if repos.is_empty() {
                         println!(
                             "{} No repositories or packages found matching '{}'.",
                             apt_prefix("FAIL"),
                             query
                         );
-                    }
-                } else {
-                    println!(
-                        "\n{} Found {} GitHub repositories for '{}':\n",
-                        c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-                        repos.len(),
-                        c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
-                    );
-
-                    for (i, repo) in repos.iter().enumerate() {
-                        let desc = repo.description.as_deref().unwrap_or("No description provided");
+                    } else {
                         println!(
-                            "  {} {} {} {}",
-                            c(&format!("{}.", i + 1), &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
-                            c(&repo.full_name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
-                            c(&format!("★ {}", repo.stargazers_count), &[Colors::BOLD, Colors::YELLOW]),
-                            c(&format!("- {}", desc), &[Colors::DIM, Colors::WHITE])
+                            "\n{} Found {} GitHub repositories for '{}':\n",
+                            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+                            repos.len(),
+                            c(query, &[Colors::BOLD, Colors::BRIGHT_CYAN])
                         );
+
+                        for (i, repo) in repos.iter().enumerate() {
+                            let desc = repo.description.as_deref().unwrap_or("No description provided");
+                            println!(
+                                "  {} {} {} {}",
+                                c(&format!("{}.", i + 1), &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
+                                c(&repo.full_name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                                c(&format!("★ {}", repo.stargazers_count), &[Colors::BOLD, Colors::YELLOW]),
+                                c(&format!("- {}", desc), &[Colors::DIM, Colors::WHITE])
+                            );
+                        }
+                        println!();
                     }
-                    println!();
                 }
-            }
-            Err(e) => {
-                if registry_matches.is_empty() {
-                    return Err(e);
+                Err(e) => {
+                    println!(" {} GitHub search failed: {}", apt_prefix("WARN"), e);
                 }
             }
         }
@@ -1623,42 +1700,64 @@ impl Core {
         let pkg = match self.db.get(target) {
             Some(p) => p.clone(),
             None => {
-                let sources = crate::registry::load_sources(&self.config.sources_list_file).unwrap_or_default();
-                if let Some((repo_name, rpkg)) = crate::registry::find_package_in_registries(
+                let effective_sources = crate::registry::get_effective_sources(
+                    &self.config.sources_list_file,
                     &self.config.registries_cache_dir,
-                    &sources,
-                    target,
-                ) {
-                    println!("\n{}", c("Package Information (Registry):", &[Colors::BOLD, Colors::BRIGHT_WHITE]));
-                    println!("  {:<16} {}", c("Name:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.name);
-                    println!("  {:<16} {}", c("ID:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.id);
-                    println!("  {:<16} [{}]", c("Format:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.format.to_uppercase());
-                    println!("  {:<16} {}", c("Status:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), c("Available in Registry (Not Installed)", &[Colors::YELLOW]));
-                    println!("  {:<16} [{}]", c("Registry:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), repo_name);
-                    println!("  {:<16} {}", c("Source Type:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.source.source_type);
-                    println!("  {:<16} {}", c("Homepage:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.homepage);
-                    println!("  {:<16} {}", c("License:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.license);
-                    println!("  {:<16} {}", c("Categories:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.categories.join(", "));
-                    println!("  {:<16} {}", c("Description:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), rpkg.description);
-                    if let Some(ref r) = rpkg.runtime {
-                        if let Some(ref envs) = r.default_env {
-                            let env_strs: Vec<String> = envs.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
-                            println!("  {:<16} {}", c("Default Env:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), env_strs.join(", "));
+                );
+
+                for src in &effective_sources {
+                    if !src.enabled {
+                        continue;
+                    }
+                    if src.driver == "apt" {
+                        let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                        let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
+                        if let Some(p) = pkgs.get(target) {
+                            println!("\n{}", c("Package Information (APT Source):", &[Colors::BOLD, Colors::BRIGHT_WHITE]));
+                            println!("  {:<16} {}", c("Name:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.package);
+                            println!("  {:<16} {}", c("Version:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.version);
+                            println!("  {:<16} [DEB]", c("Format:", &[Colors::BOLD, Colors::BRIGHT_CYAN]));
+                            println!("  {:<16} {}", c("Status:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), c("Available in Source (Not Installed)", &[Colors::YELLOW]));
+                            println!("  {:<16} [{}] ({})", c("Source:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), src.id, src.url);
+                            println!("  {:<16} {}", c("Architecture:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.architecture);
+                            let mb = p.size as f64 / (1024.0 * 1024.0);
+                            println!("  {:<16} {:.2} MB", c("Package Size:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), mb);
+                            println!("  {:<16} {}", c("SHA256:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.sha256);
+                            if let Some(ref hp) = p.homepage {
+                                println!("  {:<16} {}", c("Homepage:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), hp);
+                            }
+                            if let Some(ref desc) = p.description {
+                                println!("  {:<16} {}", c("Description:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), desc);
+                            }
+                            println!("\n        Run {} to install this package.\n", c(&format!("appmgr install {}:{}", src.id, p.package), &[Colors::BOLD, Colors::BRIGHT_YELLOW]));
+                            return;
                         }
-                        if let Some(ref args) = r.default_args {
-                            println!("  {:<16} {}", c("Default Args:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), args.join(" "));
+                    } else if src.driver == "appimagehub" {
+                        let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", src.id));
+                        let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
+                        if let Some(p) = pkgs.get(target).or_else(|| pkgs.values().find(|v| v.name.eq_ignore_ascii_case(target))) {
+                            println!("\n{}", c("Package Information (AppImageHub):", &[Colors::BOLD, Colors::BRIGHT_WHITE]));
+                            println!("  {:<16} {}", c("Name:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.name);
+                            println!("  {:<16} {}", c("ID:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.id);
+                            println!("  {:<16} [APPIMAGE]", c("Format:", &[Colors::BOLD, Colors::BRIGHT_CYAN]));
+                            println!("  {:<16} {}", c("Status:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), c("Available in Source (Not Installed)", &[Colors::YELLOW]));
+                            println!("  {:<16} [{}]", c("Source:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), src.id);
+                            if let Some(ref r) = p.github_repo {
+                                println!("  {:<16} {}", c("GitHub Repo:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), r);
+                            }
+                            if !p.categories.is_empty() {
+                                println!("  {:<16} {}", c("Categories:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), p.categories.join(", "));
+                            }
+                            if let Some(ref desc) = p.description {
+                                println!("  {:<16} {}", c("Description:", &[Colors::BOLD, Colors::BRIGHT_CYAN]), desc);
+                            }
+                            println!("\n        Run {} to install this package.\n", c(&format!("appmgr install {}:{}", src.id, p.id), &[Colors::BOLD, Colors::BRIGHT_YELLOW]));
+                            return;
                         }
                     }
-                    if let Some(ref s) = rpkg.sandbox {
-                        if s.bwrap == Some(true) {
-                            println!("  {:<16} Bubblewrap (/opt isolated)", c("Sandbox:", &[Colors::BOLD, Colors::BRIGHT_CYAN]));
-                        }
-                    }
-                    println!("\n        Run {} to install this package.\n", c(&format!("appmgr install {}", rpkg.id), &[Colors::BOLD, Colors::BRIGHT_YELLOW]));
-                    return;
                 }
 
-                println!("{} Package '{}' not found in database or repositories.", apt_prefix("FAIL"), target);
+                println!("{} Package '{}' not found in database or configured sources.", apt_prefix("FAIL"), target);
                 return;
             }
         };
@@ -1957,102 +2056,165 @@ impl Core {
     }
 
     pub async fn sync_databases(&self) -> Result<(), String> {
-        crate::registry::sync_registries(
+        crate::registry::sync_all_sources(
             &self.http_client,
             &self.config.sources_list_file,
             &self.config.registries_cache_dir,
+            &self.config.indexes_cache_dir,
         )
         .await
+        .map(|_| ())
     }
 
     pub fn repo_manage(&self, cmd: crate::cli::RepoCommands) -> Result<(), String> {
         match cmd {
-            crate::cli::RepoCommands::List => {
-                let sources = crate::registry::load_sources(&self.config.sources_list_file)?;
-                if sources.is_empty() {
-                    println!("{} No repositories configured in sources.list", apt_prefix("WARN"));
+            crate::cli::RepoCommands::List { json } => {
+                let effective_sources = crate::registry::get_effective_sources(
+                    &self.config.sources_list_file,
+                    &self.config.registries_cache_dir,
+                );
+
+                if json {
+                    let json_str = serde_json::to_string_pretty(&effective_sources)
+                        .map_err(|e| format!("Serialization error: {}", e))?;
+                    println!("{}", json_str);
+                    return Ok(());
+                }
+
+                if effective_sources.is_empty() {
+                    println!("{} No sources configured in sources.list", apt_prefix("WARN"));
                     return Ok(());
                 }
 
                 println!(
                     "{} {}",
                     c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-                    c("Configured Package Repositories:", &[Colors::BOLD, Colors::BRIGHT_WHITE])
+                    c("Configured Package Sources:", &[Colors::BOLD, Colors::BRIGHT_WHITE])
                 );
 
-                let headers = ["REPO ID", "STATUS", "URL", "PACKAGES", "LAST UPDATED"];
+                let headers = ["SOURCE ID", "DRIVER", "STATUS", "PRIO", "URL / ENDPOINT", "PACKAGES"];
                 let mut rows = Vec::new();
 
-                for entry in sources {
+                for entry in &effective_sources {
                     let status = if entry.enabled {
                         c("enabled", &[Colors::BOLD, Colors::BRIGHT_GREEN])
                     } else {
                         c("disabled", &[Colors::DIM, Colors::WHITE])
                     };
 
-                    let (pkg_count, updated_at) = if let Some(idx) =
-                        crate::registry::get_cached_index(&self.config.registries_cache_dir, &entry.id)
-                    {
-                        (
-                            format!("{} packages", idx.packages.len()),
-                            idx.updated_at.unwrap_or_else(|| "unknown".to_string()),
-                        )
-                    } else {
-                        ("not cached".to_string(), "never".to_string())
+                    let pkg_count = match entry.driver.as_str() {
+                        "apt" => {
+                            let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", entry.id));
+                            if idx_file.exists() {
+                                let pkgs = crate::drivers::apt::load_cached_apt_packages(&idx_file);
+                                format!("{} pkgs", pkgs.len())
+                            } else {
+                                "not indexed".to_string()
+                            }
+                        }
+                        "appimagehub" => {
+                            let idx_file = self.config.indexes_cache_dir.join(format!("{}.json", entry.id));
+                            if idx_file.exists() {
+                                let pkgs = crate::drivers::appimagehub::load_cached_appimagehub_packages(&idx_file);
+                                format!("{} pkgs", pkgs.len())
+                            } else {
+                                "not indexed".to_string()
+                            }
+                        }
+                        "aur" | "github" | "gitlab" => "online API".to_string(),
+                        "registry" => {
+                            let reg_file = self.config.registries_cache_dir.join(format!("{}.json", entry.id));
+                            if reg_file.exists() {
+                                "synced".to_string()
+                            } else {
+                                "not synced".to_string()
+                            }
+                        }
+                        _ => "-".to_string(),
                     };
 
                     rows.push(vec![
                         c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                        format!("[{}]", entry.driver.to_uppercase()),
                         status,
-                        entry.url,
+                        entry.priority.to_string(),
+                        entry.url.clone(),
                         pkg_count,
-                        updated_at,
                     ]);
                 }
 
                 print_table(&headers, &rows);
                 Ok(())
             }
-            crate::cli::RepoCommands::Add { id, url } => {
-                crate::registry::add_repo(&self.config.sources_list_file, &id, &url)?;
+            crate::cli::RepoCommands::Add {
+                driver,
+                id,
+                url,
+                suite,
+                components,
+                priority,
+            } => {
+                let comps = components.map(|c| c.split_whitespace().map(|s| s.to_string()).collect());
+                let entry = crate::registry::SourceConfigEntry {
+                    driver: driver.clone(),
+                    id: id.clone(),
+                    url: url.clone(),
+                    enabled: true,
+                    priority: priority.unwrap_or(500),
+                    suite,
+                    components: comps,
+                    mode: None,
+                    name: None,
+                    description: None,
+                };
+                crate::registry::add_source(&self.config.sources_list_file, entry)?;
                 println!(
-                    "{} Added repository '{}' ({}) to sources.list",
+                    "{} Added source '{}' [driver: {}] ({}) to sources.list",
                     apt_prefix("OK"),
                     c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                    c(&driver, &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
                     url
                 );
                 println!(
-                    "        Run {} to synchronize the package database.",
+                    "        Run {} to synchronize the package databases.",
                     c("appmgr update", &[Colors::BOLD, Colors::BRIGHT_YELLOW])
                 );
                 Ok(())
             }
             crate::cli::RepoCommands::Remove { id } => {
-                crate::registry::remove_repo(
-                    &self.config.sources_list_file,
-                    &id,
-                    &self.config.registries_cache_dir,
-                )?;
-                println!(
-                    "{} Removed repository '{}' and purged cache.",
-                    apt_prefix("OK"),
-                    c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
-                );
+                let removed = crate::registry::remove_source(&self.config.sources_list_file, &id)?;
+                if removed {
+                    let idx_cache = self.config.indexes_cache_dir.join(format!("{}.json", id));
+                    let _ = fs::remove_file(idx_cache);
+                    let reg_cache = self.config.registries_cache_dir.join(format!("{}.json", id));
+                    let _ = fs::remove_file(reg_cache);
+                    println!(
+                        "{} Removed source '{}' and purged cache.",
+                        apt_prefix("OK"),
+                        c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                    );
+                } else {
+                    println!(
+                        "{} Source '{}' was not found in sources.list.",
+                        apt_prefix("WARN"),
+                        id
+                    );
+                }
                 Ok(())
             }
             crate::cli::RepoCommands::Enable { id } => {
-                crate::registry::set_repo_enabled(&self.config.sources_list_file, &id, true)?;
+                crate::registry::set_source_enabled(&self.config.sources_list_file, &id, true)?;
                 println!(
-                    "{} Enabled repository '{}'.",
+                    "{} Enabled source '{}'.",
                     apt_prefix("OK"),
                     c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
                 );
                 Ok(())
             }
             crate::cli::RepoCommands::Disable { id } => {
-                crate::registry::set_repo_enabled(&self.config.sources_list_file, &id, false)?;
+                crate::registry::set_source_enabled(&self.config.sources_list_file, &id, false)?;
                 println!(
-                    "{} Disabled repository '{}'.",
+                    "{} Disabled source '{}'.",
                     apt_prefix("OK"),
                     c(&id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
                 );
@@ -2061,26 +2223,17 @@ impl Core {
         }
     }
 
-    pub async fn pkg_manage(&self, cmd: crate::cli::PkgCommands) -> Result<(), String> {
+    pub async fn source_manage(&self, cmd: crate::cli::SourceCommands) -> Result<(), String> {
         match cmd {
-            crate::cli::PkgCommands::New { id, output } => {
-                let out_path = crate::registry::pkg_new(&id, output.as_deref().map(Path::new))?;
-                println!(
-                    "{} Created new package recipe template: {}",
-                    apt_prefix("OK"),
-                    c(&out_path.display().to_string(), &[Colors::BOLD, Colors::BRIGHT_GREEN])
-                );
-                Ok(())
-            }
-            crate::cli::PkgCommands::Lint { file } => {
+            crate::cli::SourceCommands::Lint { file } => {
                 let path = Path::new(&file);
-                match crate::registry::pkg_lint(path) {
-                    Ok(r) => {
+                match crate::registry::source_lint(path) {
+                    Ok(recipe) => {
                         println!(
-                            "{} Recipe '{}' ({}) is valid Schema v1.",
+                            "{} Source definition '{}' ({}) is valid Schema v2.",
                             apt_prefix("OK"),
-                            c(&r.package.name, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-                            r.package.id
+                            c(&recipe.source.name, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+                            recipe.source.id
                         );
                         Ok(())
                     }
@@ -2088,12 +2241,53 @@ impl Core {
                         for e in errs {
                             println!("{} {}", apt_prefix("FAIL"), e);
                         }
-                        Err("Recipe linting failed".to_string())
+                        Err("Source linting failed".to_string())
                     }
                 }
             }
-            crate::cli::PkgCommands::Test { file, dry_run } => {
-                crate::registry::pkg_test(&self.http_client, Path::new(&file), dry_run).await
+            crate::cli::SourceCommands::Test { file } => {
+                crate::registry::source_test(Path::new(&file), &self.http_client).await
+            }
+        }
+    }
+
+    pub async fn pkg_manage(&self, cmd: crate::cli::PkgCommands) -> Result<(), String> {
+        match cmd {
+            crate::cli::PkgCommands::New { id, output } => {
+                let out_dir = output.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("sources"));
+                let _ = fs::create_dir_all(&out_dir);
+                let out_path = out_dir.join(format!("{}.toml", id));
+                let template = format!(
+                    r#"schema_version = 2
+
+[source]
+id = "{id}"
+name = "{id}"
+description = "Repository source for {id}"
+driver = "apt"
+priority = 500
+enabled = true
+
+[apt]
+root_url = "https://example.com/packages"
+suite = "stable"
+components = ["main"]
+architectures = ["amd64", "arm64"]
+"#
+                );
+                fs::write(&out_path, template).map_err(|e| format!("Failed to create template: {}", e))?;
+                println!(
+                    "{} Created new source recipe template: {}",
+                    apt_prefix("OK"),
+                    c(&out_path.display().to_string(), &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                );
+                Ok(())
+            }
+            crate::cli::PkgCommands::Lint { file } => {
+                self.source_manage(crate::cli::SourceCommands::Lint { file }).await
+            }
+            crate::cli::PkgCommands::Test { file, dry_run: _ } => {
+                self.source_manage(crate::cli::SourceCommands::Test { file }).await
             }
         }
     }
@@ -2175,264 +2369,77 @@ impl Core {
         Ok(())
     }
 
-    pub async fn install_from_registry_package(
+    pub async fn install_from_apt_source(
         &mut self,
-        repo_name: &str,
-        pkg: &crate::registry::RegistryPackage,
+        source: &crate::registry::SourceConfigEntry,
+        pkg: &crate::drivers::apt::AptPackage,
         force: bool,
         assume_yes: bool,
-        prefer: Option<&str>,
-        include_pre: bool,
     ) -> Result<bool, String> {
         println!(
-            "{} Resolving package '{}' from repository [{}]...",
+            "{} Resolving package '{}' from APT source [{}]...",
             apt_prefix("INFO"),
-            c(&pkg.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
-            c(repo_name, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+            c(&pkg.package, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+            c(&source.id, &[Colors::BOLD, Colors::BRIGHT_GREEN])
         );
 
         let cache_download_dir = self.config.cache_dir.join("downloads");
         let _ = fs::create_dir_all(&cache_download_dir);
 
-        let (downloaded_file, detected_version, source_type) = match pkg.source.source_type.as_str() {
-            "github" => {
-                let repo = pkg.source.repo.as_ref().ok_or_else(|| "Missing github repo in recipe".to_string())?;
-                let pre = include_pre || pkg.source.pre == Some(true);
-                let (status, release_opt, _, _) = self.github.get_release(repo, None, pre, None).await?;
-                if status == StatusCode::NOT_FOUND || release_opt.is_none() {
-                    return Err(format!("No release found on GitHub for {}", repo));
-                }
-                let release = release_opt.unwrap();
-
-                let effective_prefer = prefer.or(pkg.source.prefer.as_deref());
-                let candidates = self.github.filter_assets(
-                    &release.assets,
-                    effective_prefer,
-                    pkg.source.asset_regex.as_deref(),
-                    Some(&pkg.id),
-                );
-                let chosen = candidates.first().ok_or_else(|| {
-                    format!("No compatible release assets found for package '{}'", pkg.id)
-                })?;
-
-                let target_path = cache_download_dir.join(&chosen.name);
-                self.github
-                    .download_asset(
-                        &chosen.url,
-                        &target_path,
-                        chosen.size,
-                        &chosen.name,
-                        Some(chosen),
-                        Some(&release.assets),
-                    )
-                    .await?;
-
-                (target_path, release.tag_name, "github".to_string())
-            }
-            "redirect" => {
-                let url = pkg.source.url.as_ref().ok_or_else(|| "Missing redirect url in recipe".to_string())?;
-                let no_redirect_client = reqwest::Client::builder()
-                    .redirect(reqwest::redirect::Policy::none())
-                    .user_agent("appmgr")
-                    .build()
-                    .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-                let head_resp = no_redirect_client
-                    .head(url)
-                    .send()
-                    .await
-                    .map_err(|e| format!("Failed to resolve redirect header from {}: {}", url, e))?;
-
-                let resolved_url = if head_resp.status().is_redirection() {
-                    let loc = head_resp
-                        .headers()
-                        .get("location")
-                        .and_then(|v| v.to_str().ok())
-                        .ok_or_else(|| "Redirect missing Location header".to_string())?;
-                    if loc.starts_with("http://") || loc.starts_with("https://") {
-                        loc.to_string()
-                    } else {
-                        let base = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
-                        base.join(loc).map_err(|e| e.to_string())?.to_string()
-                    }
-                } else {
-                    url.to_string()
-                };
-
-                let url_path = reqwest::Url::parse(&resolved_url).map(|u| u.path().to_string()).unwrap_or_default();
-                let raw_filename = url_path.split('/').next_back().unwrap_or(&pkg.id);
-                let filename = if raw_filename.is_empty() || !raw_filename.contains('.') {
-                    format!("{}.{}", pkg.id, pkg.format)
-                } else {
-                    raw_filename.to_string()
-                };
-
-                let version = if let Some(ref v_regex) = pkg.source.version_regex {
-                    if let Ok(re) = regex::Regex::new(v_regex) {
-                        re.captures(&resolved_url)
-                            .or_else(|| re.captures(&filename))
-                            .and_then(|c| c.get(1))
-                            .map(|m| m.as_str().to_string())
-                            .unwrap_or_else(|| "latest".to_string())
-                    } else {
-                        "latest".to_string()
-                    }
-                } else {
-                    "latest".to_string()
-                };
-
-                let target_path = cache_download_dir.join(&filename);
-                self.download_direct_url(&resolved_url, &target_path, &filename, None).await?;
-
-                (target_path, version, "redirect".to_string())
-            }
-            "direct" => {
-                let arch = std::env::consts::ARCH;
-                let direct_url = if arch == "x86_64" {
-                    pkg.source.x86_64.as_ref().ok_or_else(|| "x86_64 direct URL not specified in recipe".to_string())?
-                } else if arch == "aarch64" {
-                    pkg.source.aarch64.as_ref().ok_or_else(|| "aarch64 direct URL not available for this package".to_string())?
-                } else {
-                    return Err(format!("Unsupported architecture: {}", arch));
-                };
-
-                let url_path = reqwest::Url::parse(direct_url).map(|u| u.path().to_string()).unwrap_or_default();
-                let raw_filename = url_path.split('/').next_back().unwrap_or(&pkg.id);
-                let filename = if raw_filename.is_empty() || !raw_filename.contains('.') {
-                    format!("{}.{}", pkg.id, pkg.format)
-                } else {
-                    raw_filename.to_string()
-                };
-
-                let mut expected_sha256 = None;
-                if let Some(ref sha_url) = pkg.source.sha256_url {
-                    if let Ok(resp) = self.http_client.get(sha_url).send().await {
-                        if let Ok(body) = resp.text().await {
-                            let first_word = body.split_whitespace().next().unwrap_or("").to_string();
-                            if first_word.len() == 64 {
-                                expected_sha256 = Some(first_word);
-                            }
-                        }
-                    }
-                }
-
-                let version = if let Some(ref v_url) = pkg.source.version_url {
-                    if let Ok(resp) = self.http_client.get(v_url).send().await {
-                        if let Ok(body) = resp.text().await {
-                            body.trim().to_string()
-                        } else {
-                            "latest".to_string()
-                        }
-                    } else {
-                        "latest".to_string()
-                    }
-                } else {
-                    "latest".to_string()
-                };
-
-                let target_path = cache_download_dir.join(&filename);
-                self.download_direct_url(direct_url, &target_path, &filename, expected_sha256.as_deref()).await?;
-
-                (target_path, version, "direct".to_string())
-            }
-            "gitlab" => {
-                let instance = pkg.source.instance.as_deref().unwrap_or("https://gitlab.com");
-                let project = pkg.source.project.as_ref().ok_or_else(|| "Missing gitlab project in recipe".to_string())?;
-                let encoded_proj = project.replace('/', "%2F");
-                let api_url = format!("{}/api/v4/projects/{}/releases", instance, encoded_proj);
-
-                let resp = self.http_client.get(&api_url).send().await
-                    .map_err(|e| format!("Failed to query GitLab API: {}", e))?;
-                if !resp.status().is_success() {
-                    return Err(format!("GitLab API returned HTTP {} for {}", resp.status(), project));
-                }
-
-                let releases: serde_json::Value = resp.json().await
-                    .map_err(|e| format!("Failed to parse GitLab JSON: {}", e))?;
-                let first_rel = releases.as_array().and_then(|a| a.first())
-                    .ok_or_else(|| "No releases found on GitLab".to_string())?;
-
-                let tag = first_rel["tag_name"].as_str().unwrap_or("latest").to_string();
-                let assets_obj = &first_rel["assets"]["links"];
-                let links = assets_obj.as_array().ok_or_else(|| "No asset links in GitLab release".to_string())?;
-
-                let mut matched_link = None;
-                for link in links {
-                    let name = link["name"].as_str().unwrap_or("");
-                    let url = link["url"].as_str().unwrap_or("");
-                    if let Some(ref re_str) = pkg.source.asset_regex {
-                        if let Ok(re) = regex::Regex::new(re_str) {
-                            if re.is_match(name) || re.is_match(url) {
-                                matched_link = Some((name.to_string(), url.to_string()));
-                                break;
-                            }
-                        }
-                    } else if name.contains("linux") || name.contains("x86_64") || name.ends_with(".AppImage") || name.ends_with(".deb") {
-                        matched_link = Some((name.to_string(), url.to_string()));
-                        break;
-                    }
-                }
-
-                let (asset_name, asset_url) = matched_link
-                    .ok_or_else(|| "No compatible asset link found in GitLab release".to_string())?;
-
-                let target_path = cache_download_dir.join(&asset_name);
-                self.download_direct_url(&asset_url, &target_path, &asset_name, None).await?;
-
-                (target_path, tag, "gitlab".to_string())
-            }
-            other => return Err(format!("Unsupported recipe source type: '{}'", other)),
+        let deb_url = if pkg.filename.starts_with("http://") || pkg.filename.starts_with("https://") {
+            pkg.filename.clone()
+        } else {
+            format!("{}/{}", source.url.trim_end_matches('/'), pkg.filename.trim_start_matches('/'))
         };
 
-        let env_map = pkg.runtime.as_ref().and_then(|r| r.default_env.clone());
-        let args_vec = pkg.runtime.as_ref().and_then(|r| r.default_args.clone());
-        let clean_bin = pkg.bin_name.clone().or_else(|| Some(crate::registry::clean_binary_name(&pkg.id, &pkg.id)));
+        let file_stem = pkg.filename.split('/').next_back().unwrap_or(&pkg.package);
+        let deb_file_name = if file_stem.ends_with(".deb") {
+            file_stem.to_string()
+        } else {
+            format!("{}_{}_{}.deb", pkg.package, pkg.version, pkg.architecture)
+        };
+        let target_path = cache_download_dir.join(&deb_file_name);
+
+        let expected_sha256 = if pkg.sha256.is_empty() {
+            None
+        } else {
+            Some(pkg.sha256.as_str())
+        };
+
+        self.download_direct_url(&deb_url, &target_path, &deb_file_name, expected_sha256).await?;
 
         let installed = self.install_local_file(
-            &downloaded_file,
+            &target_path,
             force,
             assume_yes,
-            pkg.source.repo.clone(),
-            Some(detected_version),
+            None,
+            Some(pkg.version.clone()),
             None,
             None,
-            env_map,
-            args_vec,
+            None,
+            None,
             false,
-            clean_bin,
+            Some(pkg.package.clone()),
         )?;
 
         if installed {
-            let found_id = if self.db.get(&pkg.id).is_some() {
-                Some(pkg.id.clone())
+            let found_id = if self.db.get(&pkg.package).is_some() {
+                Some(pkg.package.clone())
             } else {
                 self.db
                     .all()
                     .iter()
-                    .find(|p| {
-                        p.recipe_id.as_deref() == Some(&pkg.id)
-                            || p.name.to_lowercase() == pkg.name.to_lowercase()
-                    })
+                    .find(|p| p.name.eq_ignore_ascii_case(&pkg.package))
                     .map(|p| p.id.clone())
             };
 
-            if let Some(ref id) = found_id {
-                if let Some(record) = self.db.get_mut(id) {
-                    record.name = pkg.name.clone();
-                    record.source_type = Some(source_type);
-                    record.recipe_id = Some(pkg.id.clone());
-                    record.registry_name = Some(repo_name.to_string());
-                    record.description = Some(pkg.description.clone());
-                    if let Some(gui) = pkg.gui {
-                        record.is_gui = Some(gui);
-                    }
-                    if let Some(ref r) = pkg.runtime {
-                        record.default_env = r.default_env.clone();
-                        record.default_args = r.default_args.clone();
-                    }
-                    if let Some(ref s) = pkg.sandbox {
-                        record.bwrap = s.bwrap;
-                        record.bind_opt = s.bind_opt.clone();
+            if let Some(id) = found_id {
+                if let Some(record) = self.db.get_mut(&id) {
+                    record.source_type = Some("apt".to_string());
+                    record.registry_name = Some(source.id.clone());
+                    record.recipe_id = Some(pkg.package.clone());
+                    if let Some(ref desc) = pkg.description {
+                        record.description = Some(desc.clone());
                     }
                 }
                 let _ = self.db.save();
@@ -2440,6 +2447,95 @@ impl Core {
         }
 
         Ok(installed)
+    }
+
+    pub async fn install_from_appimagehub(
+        &mut self,
+        source: &crate::registry::SourceConfigEntry,
+        app: &crate::drivers::appimagehub::AppImageHubPackage,
+        force: bool,
+        assume_yes: bool,
+    ) -> Result<bool, String> {
+        println!(
+            "{} Resolving package '{}' from AppImageHub [{}]...",
+            apt_prefix("INFO"),
+            c(&app.name, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+            c(&source.id, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+        );
+
+        if let Some(ref repo) = app.github_repo {
+            println!(
+                "{} Package '{}' has upstream GitHub repository: {}",
+                apt_prefix("INFO"),
+                c(&app.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                c(repo, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+            );
+            let installed = self
+                .install_from_github(repo, None, force, assume_yes, Some("appimage"), false)
+                .await?;
+            if installed {
+                let found_id = if self.db.get(&app.id).is_some() {
+                    Some(app.id.clone())
+                } else {
+                    self.db
+                        .all()
+                        .iter()
+                        .find(|p| p.name.eq_ignore_ascii_case(&app.name) || p.id.eq_ignore_ascii_case(&app.id))
+                        .map(|p| p.id.clone())
+                };
+                if let Some(id) = found_id {
+                    if let Some(record) = self.db.get_mut(&id) {
+                        record.source_type = Some("appimagehub".to_string());
+                        record.registry_name = Some(source.id.clone());
+                        record.recipe_id = Some(app.id.clone());
+                        if let Some(ref desc) = app.description {
+                            record.description = Some(desc.clone());
+                        }
+                    }
+                    let _ = self.db.save();
+                }
+            }
+            return Ok(installed);
+        }
+
+        if let Some(ref dl_url) = app.download_url {
+            let cache_download_dir = self.config.cache_dir.join("downloads");
+            let _ = fs::create_dir_all(&cache_download_dir);
+
+            let filename = format!("{}.AppImage", app.id);
+            let target_path = cache_download_dir.join(&filename);
+
+            self.download_direct_url(dl_url, &target_path, &filename, None).await?;
+
+            let installed = self.install_local_file(
+                &target_path,
+                force,
+                assume_yes,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                Some(app.id.clone()),
+            )?;
+
+            if installed {
+                if let Some(record) = self.db.get_mut(&app.id) {
+                    record.source_type = Some("appimagehub".to_string());
+                    record.registry_name = Some(source.id.clone());
+                    record.recipe_id = Some(app.id.clone());
+                    if let Some(ref desc) = app.description {
+                        record.description = Some(desc.clone());
+                    }
+                    let _ = self.db.save();
+                }
+            }
+            return Ok(installed);
+        }
+
+        Err(format!("Package '{}' on AppImageHub does not have an upstream GitHub repo or direct download URL.", app.id))
     }
 }
 

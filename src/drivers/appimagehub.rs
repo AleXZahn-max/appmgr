@@ -1,0 +1,224 @@
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AppImageHubPackage {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub github_repo: Option<String>,
+    #[serde(default)]
+    pub download_url: Option<String>,
+}
+
+pub fn sanitize_app_id(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    let trimmed = clean.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "app".to_string()
+    } else {
+        trimmed
+    }
+}
+
+pub fn parse_appimagehub_feed(json_content: &str) -> HashMap<String, AppImageHubPackage> {
+    let mut packages = HashMap::new();
+
+    let root: serde_json::Value = match serde_json::from_str(json_content) {
+        Ok(v) => v,
+        Err(_) => return packages,
+    };
+
+    let items = match root.get("items").and_then(|i| i.as_array()) {
+        Some(arr) => arr,
+        None => return packages,
+    };
+
+    for item in items {
+        let name = match item.get("name").and_then(|n| n.as_str()) {
+            Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+            _ => continue,
+        };
+
+        let id = sanitize_app_id(&name);
+        let description = item.get("description").and_then(|d| d.as_str()).map(|s| s.trim().to_string());
+        
+        let categories = item.get("categories")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut github_repo = None;
+        let mut download_url = None;
+
+        if let Some(links) = item.get("links").and_then(|l| l.as_array()) {
+            for link in links {
+                let link_type = link.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                let url = link.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                if url.is_empty() {
+                    continue;
+                }
+
+                if link_type.eq_ignore_ascii_case("github") {
+                    let clean = url.trim_start_matches("https://github.com/").trim_matches('/');
+                    if clean.contains('/') {
+                        github_repo = Some(clean.to_string());
+                    }
+                } else if link_type.eq_ignore_ascii_case("download") {
+                    download_url = Some(url.to_string());
+                }
+            }
+        }
+
+        let pkg = AppImageHubPackage {
+            id: id.clone(),
+            name,
+            description,
+            categories,
+            github_repo,
+            download_url,
+        };
+
+        packages.insert(id, pkg);
+    }
+
+    packages
+}
+
+pub async fn sync_appimagehub_repo(
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    source_id: &str,
+    feed_url: &str,
+) -> Result<(bool, usize, u64), String> {
+    let index_file = cache_dir.join(format!("{}.json", source_id));
+    let etag_file = cache_dir.join(format!("{}.etag", source_id));
+
+    let existing_etag = fs::read_to_string(&etag_file).ok().map(|s| s.trim().to_string());
+    let mut req = client.get(feed_url);
+
+    if let Some(ref tag) = existing_etag {
+        if index_file.exists() {
+            if tag.starts_with('"') || tag.starts_with("W/") {
+                req = req.header("If-None-Match", tag.as_str());
+            } else {
+                req = req.header("If-Modified-Since", tag.as_str());
+            }
+        }
+    }
+
+    let resp = req.send().await
+        .map_err(|e| format!("Failed to fetch AppImageHub feed {}: {}", feed_url, e))?;
+
+    if resp.status() == StatusCode::NOT_MODIFIED {
+        let count = load_cached_appimagehub_count(&index_file);
+        return Ok((false, count, 0));
+    }
+
+    if !resp.status().is_success() {
+        return Err(format!("AppImageHub returned HTTP {} for {}", resp.status(), feed_url));
+    }
+
+    let new_etag = resp
+        .headers()
+        .get("etag")
+        .or_else(|| resp.headers().get("last-modified"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let bytes = resp.bytes().await
+        .map_err(|e| format!("Failed to read AppImageHub feed body: {}", e))?;
+    let downloaded_bytes = bytes.len() as u64;
+
+    let json_text = String::from_utf8_lossy(&bytes);
+    let packages = parse_appimagehub_feed(&json_text);
+    let count = packages.len();
+
+    let json_bytes = serde_json::to_vec(&packages)
+        .map_err(|e| format!("Failed to serialize AppImageHub cache: {}", e))?;
+    let _ = fs::create_dir_all(cache_dir);
+    fs::write(&index_file, json_bytes)
+        .map_err(|e| format!("Failed to write AppImageHub index: {}", e))?;
+
+    if let Some(tag) = new_etag {
+        let _ = fs::write(&etag_file, tag);
+    }
+
+    Ok((true, count, downloaded_bytes))
+}
+
+fn load_cached_appimagehub_count(index_file: &Path) -> usize {
+    if let Ok(bytes) = fs::read(index_file) {
+        if let Ok(pkgs) = serde_json::from_slice::<HashMap<String, AppImageHubPackage>>(&bytes) {
+            return pkgs.len();
+        }
+    }
+    0
+}
+
+pub fn load_cached_appimagehub_packages(index_file: &Path) -> HashMap<String, AppImageHubPackage> {
+    if let Ok(bytes) = fs::read(index_file) {
+        if let Ok(pkgs) = serde_json::from_slice::<HashMap<String, AppImageHubPackage>>(&bytes) {
+            return pkgs;
+        }
+    }
+    HashMap::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_appimagehub_feed() {
+        let sample = r#"{
+            "version": "1.0",
+            "items": [
+                {
+                    "name": "Obsidian",
+                    "description": "Markdown-based knowledge base",
+                    "categories": ["Office", "Utility"],
+                    "links": [
+                        { "type": "GitHub", "url": "obsidianmd/obsidian-releases" },
+                        { "type": "Download", "url": "https://github.com/obsidianmd/obsidian-releases/releases/download/v1.5.0/Obsidian.AppImage" }
+                    ]
+                },
+                {
+                    "name": "Krita",
+                    "description": "Digital painting program",
+                    "categories": ["Graphics"],
+                    "links": [
+                        { "type": "Download", "url": "https://download.kde.org/krita.AppImage" }
+                    ]
+                }
+            ]
+        }"#;
+
+        let pkgs = parse_appimagehub_feed(sample);
+        assert_eq!(pkgs.len(), 2);
+
+        let obs = pkgs.get("obsidian").expect("obsidian should exist");
+        assert_eq!(obs.name, "Obsidian");
+        assert_eq!(obs.github_repo.as_deref(), Some("obsidianmd/obsidian-releases"));
+        assert_eq!(obs.categories, vec!["Office", "Utility"]);
+
+        let krita = pkgs.get("krita").expect("krita should exist");
+        assert_eq!(krita.name, "Krita");
+        assert_eq!(krita.github_repo, None);
+        assert_eq!(krita.download_url.as_deref(), Some("https://download.kde.org/krita.AppImage"));
+    }
+}

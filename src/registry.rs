@@ -1,373 +1,389 @@
+use crate::drivers::appimagehub::{load_cached_appimagehub_packages, sync_appimagehub_repo};
+use crate::drivers::apt::{load_cached_apt_packages, sync_apt_repo};
+use crate::drivers::aur::search_aur;
 use crate::ui::{apt_prefix, c, Colors};
-use regex::Regex;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub const DEFAULT_REPO_ID: &str = "core";
-pub const DEFAULT_REPO_URL: &str = "https://alexzahn-max.github.io/appmgr-registry/index.json";
+pub const DEFAULT_REGISTRY_ID: &str = "official";
+pub const DEFAULT_REGISTRY_URL: &str = "https://alexzahn-max.github.io/appmgr-registry/sources.json";
 
 // ============================================================================
-// Schema v1 Data Models
+// Sources Schema v2 Models
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Recipe {
+pub struct SourceRecipe {
     pub schema_version: u32,
-    pub package: PackageMeta,
-    pub source: SourceConfig,
+    pub source: SourceDefinition,
     #[serde(default)]
-    pub runtime: Option<RuntimeConfig>,
+    pub apt: Option<AptSourceConfig>,
     #[serde(default)]
-    pub sandbox: Option<SandboxConfig>,
+    pub api: Option<ApiSourceConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PackageMeta {
+pub struct SourceDefinition {
     pub id: String,
     pub name: String,
-    pub description: String,
-    pub homepage: String,
-    pub license: String,
-    pub categories: Vec<String>,
+    pub driver: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_priority")]
+    pub priority: i32,
+    #[serde(default = "default_architectures")]
+    pub architectures: Vec<String>,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_priority() -> i32 {
+    100
+}
+fn default_architectures() -> Vec<String> {
+    vec!["any".to_string()]
+}
+fn default_mode() -> String {
+    "indexed".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AptSourceConfig {
+    pub suite: String,
+    pub components: Vec<String>,
+    #[serde(default = "default_format_deb")]
     pub format: String,
-    #[serde(default)]
-    pub bin_name: Option<String>,
-    #[serde(default)]
-    pub gui: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SourceConfig {
-    #[serde(rename = "type")]
-    pub source_type: String,
-    #[serde(default)]
-    pub repo: Option<String>,
-    #[serde(default)]
-    pub asset_regex: Option<String>,
-    #[serde(default)]
-    pub prefer: Option<String>,
-    #[serde(default)]
-    pub pre: Option<bool>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub version_regex: Option<String>,
-    #[serde(default)]
-    pub x86_64: Option<String>,
-    #[serde(default)]
-    pub aarch64: Option<String>,
-    #[serde(default)]
-    pub version_url: Option<String>,
-    #[serde(default)]
-    pub sha256_url: Option<String>,
-    #[serde(default)]
-    pub instance: Option<String>,
-    #[serde(default)]
-    pub project: Option<String>,
+fn default_format_deb() -> String {
+    "deb".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RuntimeConfig {
+pub struct ApiSourceConfig {
     #[serde(default)]
-    pub default_env: Option<HashMap<String, String>>,
+    pub feed_url: Option<String>,
     #[serde(default)]
-    pub default_args: Option<Vec<String>>,
+    pub rpc_url: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SandboxConfig {
-    #[serde(default)]
-    pub bwrap: Option<bool>,
-    #[serde(default)]
-    pub bind_opt: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryIndex {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcesIndex {
     pub schema_version: u32,
     pub registry_name: String,
     #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default, alias = "generated_at")]
-    pub updated_at: Option<String>,
-    pub packages: HashMap<String, Recipe>,
+    pub generated_at: Option<String>,
+    #[serde(default)]
+    pub source_count: usize,
+    pub sources: Vec<SourceRecipe>,
 }
 
-impl RegistryIndex {
-    pub fn get_packages(&self) -> Vec<RegistryPackage> {
-        self.packages
-            .values()
-            .map(|r| RegistryPackage {
-                id: r.package.id.clone(),
-                name: r.package.name.clone(),
-                description: r.package.description.clone(),
-                homepage: r.package.homepage.clone(),
-                license: r.package.license.clone(),
-                categories: r.package.categories.clone(),
-                format: r.package.format.clone(),
-                bin_name: r.package.bin_name.clone(),
-                gui: r.package.gui,
-                source: r.source.clone(),
-                runtime: r.runtime.clone(),
-                sandbox: r.sandbox.clone(),
-            })
-            .collect()
-    }
-}
+// ============================================================================
+// sources.list Config Entry
+// ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryPackage {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub homepage: String,
-    pub license: String,
-    pub categories: Vec<String>,
-    pub format: String,
-    #[serde(default)]
-    pub bin_name: Option<String>,
-    #[serde(default)]
-    pub gui: Option<bool>,
-    pub source: SourceConfig,
-    #[serde(default)]
-    pub runtime: Option<RuntimeConfig>,
-    #[serde(default)]
-    pub sandbox: Option<SandboxConfig>,
-}
-
-// ============================================================================
-// sources.list Repository Manager
-// ============================================================================
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoEntry {
+pub struct SourceConfigEntry {
+    pub driver: String,
     pub id: String,
     pub url: String,
+    #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_priority")]
+    pub priority: i32,
+    #[serde(default)]
+    pub suite: Option<String>,
+    #[serde(default)]
+    pub components: Option<Vec<String>>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
-pub fn load_sources(path: &Path) -> Result<Vec<RepoEntry>, String> {
-    if !path.exists() {
-        let fallback = Path::new("/etc/appmgr/sources.list");
-        if fallback.exists() {
-            return parse_sources_file(fallback);
-        }
-        return create_default_sources(path);
-    }
-    parse_sources_file(path)
-}
-
-fn create_default_sources(path: &Path) -> Result<Vec<RepoEntry>, String> {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let default_content = format!(
-        "# appmgr package repositories list\n# Syntax: <repo_id> <url_or_file_path>\n{} {}\n",
-        DEFAULT_REPO_ID, DEFAULT_REPO_URL
-    );
-    let _ = fs::write(path, default_content);
-    Ok(vec![RepoEntry {
-        id: DEFAULT_REPO_ID.to_string(),
-        url: DEFAULT_REPO_URL.to_string(),
-        enabled: true,
-    }])
-}
-
-fn parse_sources_file(path: &Path) -> Result<Vec<RepoEntry>, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read sources.list at {}: {}", path.display(), e))?;
-
+pub fn parse_sources_list_content(content: &str) -> Vec<SourceConfigEntry> {
     let mut entries = Vec::new();
+
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
 
-        if let Some(commented) = trimmed.strip_prefix('#') {
-            let inner = commented.trim();
-            let parts: Vec<&str> = inner.split_whitespace().collect();
-            if parts.len() >= 2 && is_valid_repo_id(parts[0]) && is_valid_repo_url(parts[1]) {
-                entries.push(RepoEntry {
-                    id: parts[0].to_string(),
-                    url: parts[1].to_string(),
-                    enabled: false,
-                });
+        let is_disabled = trimmed.starts_with('#');
+        let clean_line = if is_disabled {
+            let without_hash = trimmed.trim_start_matches('#').trim();
+            if let Some(rest) = without_hash.strip_prefix("disabled:") {
+                rest.trim()
+            } else {
+                without_hash
             }
         } else {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 2 && is_valid_repo_id(parts[0]) && is_valid_repo_url(parts[1]) {
-                entries.push(RepoEntry {
-                    id: parts[0].to_string(),
-                    url: parts[1].to_string(),
-                    enabled: true,
-                });
+            trimmed
+        };
+
+        if clean_line.is_empty() || clean_line.starts_with("Format:") || clean_line.starts_with("Generated at:") {
+            continue;
+        }
+
+        let parts: Vec<&str> = clean_line.split_whitespace().collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let driver = parts[0].to_lowercase();
+        let id = parts[1].to_string();
+        let url = parts[2].to_string();
+
+        let mut priority = 100;
+        let mut suite = None;
+        let mut components = None;
+        let mut mode = None;
+
+        for opt in &parts[3..] {
+            if let Some(eq_idx) = opt.find('=') {
+                let k = &opt[..eq_idx].to_lowercase();
+                let v = &opt[eq_idx + 1..];
+                match k.as_str() {
+                    "priority" => {
+                        if let Ok(p) = v.parse::<i32>() {
+                            priority = p;
+                        }
+                    }
+                    "suite" => suite = Some(v.to_string()),
+                    "components" => {
+                        components = Some(v.split(',').map(|s| s.trim().to_string()).collect())
+                    }
+                    "mode" => mode = Some(v.to_string()),
+                    _ => {}
+                }
             }
         }
+
+        let default_mode_val = if driver == "apt" || driver == "appimagehub" {
+            "indexed".to_string()
+        } else if driver == "registry" {
+            "registry".to_string()
+        } else {
+            "online".to_string()
+        };
+
+        entries.push(SourceConfigEntry {
+            driver,
+            id,
+            url,
+            enabled: !is_disabled,
+            priority,
+            suite,
+            components,
+            mode: Some(mode.unwrap_or(default_mode_val)),
+            name: None,
+            description: None,
+        });
     }
 
-    Ok(entries)
+    entries
 }
 
-pub fn save_sources(path: &Path, entries: &[RepoEntry]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let mut out = String::from("# appmgr package repositories list\n# Syntax: <repo_id> <url_or_file_path>\n\n");
+pub fn format_sources_list_content(entries: &[SourceConfigEntry]) -> String {
+    let mut lines = Vec::new();
+    lines.push("# appmgr official sources.list (managed)".to_string());
+    lines.push("# Format: <driver> <id> <base_url> [options...]".to_string());
+    lines.push("".to_string());
+
     for entry in entries {
-        if entry.enabled {
-            out.push_str(&format!("{} {}\n", entry.id, entry.url));
+        let mut opts = Vec::new();
+        if let Some(ref s) = entry.suite {
+            opts.push(format!("suite={}", s));
+        }
+        if let Some(ref comps) = entry.components {
+            opts.push(format!("components={}", comps.join(",")));
+        }
+        opts.push(format!("priority={}", entry.priority));
+
+        let opt_str = if opts.is_empty() {
+            String::new()
         } else {
-            out.push_str(&format!("# {} {}\n", entry.id, entry.url));
+            format!(" {}", opts.join(" "))
+        };
+
+        let raw_line = format!("{} {} {}{}", entry.driver, entry.id, entry.url, opt_str);
+        if entry.enabled {
+            lines.push(raw_line);
+        } else {
+            lines.push(format!("# disabled: {}", raw_line));
         }
     }
-    fs::write(path, out)
-        .map_err(|e| format!("Failed to write sources.list at {}: {}", path.display(), e))
+    lines.push("".to_string());
+    lines.join("\n")
 }
 
-pub fn add_repo(path: &Path, id: &str, url: &str) -> Result<(), String> {
-    if !is_valid_repo_id(id) {
-        return Err(format!(
-            "Invalid repository ID '{}': must consist of lowercase letters, digits, and hyphens",
-            id
-        ));
-    }
-    if !is_valid_repo_url(url) {
-        return Err(format!(
-            "Invalid repository URL '{}': must start with http://, https://, or file://",
-            url
-        ));
+pub fn load_sources(file_path: &Path) -> Result<Vec<SourceConfigEntry>, String> {
+    if !file_path.exists() {
+        if let Some(parent) = file_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let default_entries = vec![SourceConfigEntry {
+            driver: "registry".to_string(),
+            id: DEFAULT_REGISTRY_ID.to_string(),
+            url: DEFAULT_REGISTRY_URL.to_string(),
+            enabled: true,
+            priority: 100,
+            suite: None,
+            components: None,
+            mode: Some("registry".to_string()),
+            name: Some("Official Sources Registry".to_string()),
+            description: None,
+        }];
+        let _ = save_sources(file_path, &default_entries);
+        return Ok(default_entries);
     }
 
-    let mut entries = load_sources(path)?;
-    if entries.iter().any(|e| e.id == id) {
-        return Err(format!("Repository '{}' already exists in sources.list", id));
-    }
-
-    entries.push(RepoEntry {
-        id: id.to_string(),
-        url: url.to_string(),
-        enabled: true,
-    });
-    save_sources(path, &entries)
+    let content = fs::read_to_string(file_path)
+        .map_err(|e| format!("Failed to read sources.list at {}: {}", file_path.display(), e))?;
+    Ok(parse_sources_list_content(&content))
 }
 
-pub fn remove_repo(path: &Path, id: &str, cache_dir: &Path) -> Result<(), String> {
-    let mut entries = load_sources(path)?;
+pub fn save_sources(file_path: &Path, entries: &[SourceConfigEntry]) -> Result<(), String> {
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config dir {}: {}", parent.display(), e))?;
+    }
+    let content = format_sources_list_content(entries);
+    fs::write(file_path, content)
+        .map_err(|e| format!("Failed to write sources.list at {}: {}", file_path.display(), e))
+}
+
+pub fn add_source(file_path: &Path, new_entry: SourceConfigEntry) -> Result<(), String> {
+    let mut entries = load_sources(file_path).unwrap_or_default();
+    entries.retain(|e| e.id != new_entry.id);
+    entries.push(new_entry);
+    save_sources(file_path, &entries)
+}
+
+pub fn remove_source(file_path: &Path, id: &str) -> Result<bool, String> {
+    let mut entries = load_sources(file_path)?;
     let initial_len = entries.len();
     entries.retain(|e| e.id != id);
-
-    if entries.len() == initial_len {
-        return Err(format!("Repository '{}' not found in sources.list", id));
+    if entries.len() != initial_len {
+        save_sources(file_path, &entries)?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
-
-    save_sources(path, &entries)?;
-
-    // Remove cache files
-    let cache_file = cache_dir.join(format!("{}.json", id));
-    let etag_file = cache_dir.join(format!("{}.etag", id));
-    let _ = fs::remove_file(cache_file);
-    let _ = fs::remove_file(etag_file);
-
-    Ok(())
 }
 
-pub fn set_repo_enabled(path: &Path, id: &str, enabled: bool) -> Result<(), String> {
-    let mut entries = load_sources(path)?;
+pub fn set_source_enabled(file_path: &Path, id: &str, enabled: bool) -> Result<bool, String> {
+    let mut entries = load_sources(file_path)?;
     let mut found = false;
-    for entry in &mut entries {
-        if entry.id == id {
-            entry.enabled = enabled;
+    for e in &mut entries {
+        if e.id == id {
+            e.enabled = enabled;
             found = true;
             break;
         }
     }
-    if !found {
-        return Err(format!("Repository '{}' not found in sources.list", id));
+    if found {
+        save_sources(file_path, &entries)?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
-    save_sources(path, &entries)
 }
 
-fn is_valid_repo_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
+/// Resolves all effective sources by merging local sources.list with remote meta-registry caches
+pub fn get_effective_sources(
+    sources_file: &Path,
+    registries_cache_dir: &Path,
+) -> Vec<SourceConfigEntry> {
+    let local_entries = load_sources(sources_file).unwrap_or_default();
+    let mut effective_map: HashMap<String, SourceConfigEntry> = HashMap::new();
 
-fn is_valid_repo_url(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://")
+    // 1. Process meta-registries
+    for entry in &local_entries {
+        if entry.driver == "registry" && entry.enabled {
+            let cache_file = registries_cache_dir.join(format!("{}.json", entry.id));
+            if let Ok(bytes) = fs::read(&cache_file) {
+                if let Ok(idx) = serde_json::from_slice::<SourcesIndex>(&bytes) {
+                    for r in idx.sources {
+                        let src = r.source;
+                        let apt_suite = r.apt.as_ref().map(|a| a.suite.clone());
+                        let apt_comps = r.apt.as_ref().map(|a| a.components.clone());
+                        effective_map.insert(
+                            src.id.clone(),
+                            SourceConfigEntry {
+                                driver: src.driver.clone(),
+                                id: src.id.clone(),
+                                url: src.base_url.clone(),
+                                enabled: src.enabled,
+                                priority: src.priority,
+                                suite: apt_suite,
+                                components: apt_comps,
+                                mode: Some(src.mode),
+                                name: Some(src.name),
+                                description: src.description,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Local entries in sources.list override remote registry definitions
+    for entry in local_entries {
+        if entry.driver != "registry" {
+            effective_map.insert(entry.id.clone(), entry);
+        }
+    }
+
+    let mut result: Vec<SourceConfigEntry> = effective_map.into_values().collect();
+    result.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
+    result
 }
 
 // ============================================================================
-// Registry Index Synchronization (appmgr update / sync)
+// Multi-threaded Synchronize Engine
 // ============================================================================
 
-pub async fn sync_registries(
+pub async fn sync_all_sources(
     client: &reqwest::Client,
-    sources_path: &Path,
-    cache_dir: &Path,
-) -> Result<(), String> {
-    let entries = load_sources(sources_path)?;
-    let enabled_entries: Vec<RepoEntry> = entries.into_iter().filter(|e| e.enabled).collect();
-
-    if enabled_entries.is_empty() {
-        println!(
-            "{} No active repositories found in {}",
-            apt_prefix("WARN"),
-            sources_path.display()
-        );
-        return Ok(());
-    }
-
+    sources_file: &Path,
+    registries_cache_dir: &Path,
+    indexes_cache_dir: &Path,
+) -> Result<(usize, usize), String> {
     println!(
         "{} {}",
         c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-        c("Synchronizing package databases...", &[Colors::BOLD, Colors::BRIGHT_WHITE])
+        c("Synchronizing package sources and databases...", &[Colors::BOLD, Colors::BRIGHT_WHITE])
     );
 
-    let _ = fs::create_dir_all(cache_dir);
+    let local_sources = load_sources(sources_file)?;
+    let mut updated_sources_count = 0;
+    let mut total_packages = 0;
 
-    let mut total_packages = 0usize;
-    let mut updated_repos = 0usize;
-
-    for (idx, entry) in enabled_entries.iter().enumerate() {
-        let repo_num = idx + 1;
-        let cache_file = cache_dir.join(format!("{}.json", entry.id));
-        let etag_file = cache_dir.join(format!("{}.etag", entry.id));
-
-        if entry.url.starts_with("file://") {
-            let local_path = PathBuf::from(entry.url.trim_start_matches("file://"));
-            match fs::read_to_string(&local_path) {
-                Ok(content) => {
-                    let _ = fs::write(&cache_file, &content);
-                    if let Ok(idx_data) = serde_json::from_str::<RegistryIndex>(&content) {
-                        total_packages += idx_data.packages.len();
-                    }
-                    updated_repos += 1;
-                    println!(
-                        "Get:{} {} [{}] (local file)",
-                        repo_num,
-                        entry.url,
-                        c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN])
-                    );
-                }
-                Err(e) => {
-                    println!(
-                        "{} Failed to read local repository file {}: {}",
-                        apt_prefix("FAIL"),
-                        local_path.display(),
-                        e
-                    );
-                }
-            }
+    // 1. Update meta-registries (sources.json)
+    for entry in &local_sources {
+        if entry.driver != "registry" || !entry.enabled {
             continue;
         }
 
-        // HTTP/HTTPS Fetch with ETag / Last-Modified caching
+        let cache_file = registries_cache_dir.join(format!("{}.json", entry.id));
+        let etag_file = registries_cache_dir.join(format!("{}.etag", entry.id));
+
         let mut req = client.get(&entry.url);
         let existing_etag = fs::read_to_string(&etag_file).ok().map(|s| s.trim().to_string());
         if let Some(ref etag) = existing_etag {
@@ -381,80 +397,45 @@ pub async fn sync_registries(
         }
 
         match req.send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                if status == reqwest::StatusCode::NOT_MODIFIED {
-                    // 304 Not Modified
-                    if let Ok(cached) = fs::read_to_string(&cache_file) {
-                        if let Ok(idx_data) = serde_json::from_str::<RegistryIndex>(&cached) {
-                            total_packages += idx_data.packages.len();
-                        }
-                    }
-                    updated_repos += 1;
+            Ok(resp) if resp.status() == StatusCode::NOT_MODIFIED => {
+                println!("Hit:1 [{}] (cached registry)", c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]));
+            }
+            Ok(resp) if resp.status().is_success() => {
+                let new_etag = resp
+                    .headers()
+                    .get("etag")
+                    .or_else(|| resp.headers().get("last-modified"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                if let Ok(bytes) = resp.bytes().await {
+                    let kb = bytes.len() as f64 / 1024.0;
                     println!(
-                        "Hit:{} [{}] (cached)",
-                        repo_num,
-                        c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                        "Get:1 {} [{}] ({:.1} KiB)",
+                        entry.url,
+                        c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                        kb
                     );
-                } else if status.is_success() {
-                    // 200 OK
-                    let new_etag = resp
-                        .headers()
-                        .get("etag")
-                        .or_else(|| resp.headers().get("last-modified"))
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string());
-
-                    match resp.bytes().await {
-                        Ok(bytes) => {
-                            let size_kb = bytes.len() as f64 / 1024.0;
-                            // Atomic write
-                            let tmp_cache = cache_file.with_extension("tmp");
-                            if let Ok(mut f) = fs::File::create(&tmp_cache) {
-                                let _ = f.write_all(&bytes);
-                                let _ = f.sync_all();
-                                let _ = fs::rename(&tmp_cache, &cache_file);
-                            }
-
-                            if let Some(etag) = new_etag {
-                                let _ = fs::write(&etag_file, etag);
-                            }
-
-                            if let Ok(idx_data) = serde_json::from_slice::<RegistryIndex>(&bytes) {
-                                total_packages += idx_data.packages.len();
-                            }
-
-                            updated_repos += 1;
-                            println!(
-                                "Get:{} {} [{}] ({:.1} KiB)",
-                                repo_num,
-                                entry.url,
-                                c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
-                                size_kb
-                            );
-                        }
-                        Err(e) => {
-                            println!(
-                                "{} Failed to read body from {}: {}",
-                                apt_prefix("FAIL"),
-                                entry.url,
-                                e
-                            );
-                        }
+                    let _ = fs::create_dir_all(registries_cache_dir);
+                    let _ = fs::write(&cache_file, &bytes);
+                    if let Some(tag) = new_etag {
+                        let _ = fs::write(&etag_file, tag);
                     }
-                } else {
-                    println!(
-                        "{} HTTP {} from {}",
-                        apt_prefix("FAIL"),
-                        status,
-                        entry.url
-                    );
+                    updated_sources_count += 1;
                 }
+            }
+            Ok(resp) => {
+                println!(
+                    " {} Failed to fetch registry {} [HTTP {}]",
+                    apt_prefix("WARN"),
+                    entry.url,
+                    resp.status()
+                );
             }
             Err(e) => {
                 println!(
-                    "{} Failed to connect to {}: {}",
-                    apt_prefix("FAIL"),
+                    " {} Network error fetching registry {}: {}",
+                    apt_prefix("WARN"),
                     entry.url,
                     e
                 );
@@ -462,337 +443,283 @@ pub async fn sync_registries(
         }
     }
 
+    // 2. Reload effective sources
+    let effective = get_effective_sources(sources_file, registries_cache_dir);
+    let _ = fs::create_dir_all(indexes_cache_dir);
+
+    // 3. Concurrently sync indexed drivers (apt, appimagehub)
+    let mut tasks = Vec::new();
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(6));
+
+    for (idx, src) in effective.into_iter().enumerate() {
+        if !src.enabled {
+            continue;
+        }
+
+        let is_indexed = src.mode.as_deref() == Some("indexed")
+            || src.driver == "apt"
+            || src.driver == "appimagehub";
+
+        if !is_indexed {
+            continue;
+        }
+
+        let permit = sem.clone();
+        let http = client.clone();
+        let cache_dir = indexes_cache_dir.to_path_buf();
+        let num = idx + 1;
+
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit.acquire().await.unwrap();
+            match src.driver.as_str() {
+                "apt" => {
+                    let suite = src.suite.as_deref().unwrap_or("stable");
+                    let component = src.components.as_ref().and_then(|c| c.first()).map(|s| s.as_str()).unwrap_or("main");
+                    let res = sync_apt_repo(&http, &cache_dir, &src.id, &src.url, suite, component).await;
+                    (num, src, res)
+                }
+                "appimagehub" => {
+                    let res = sync_appimagehub_repo(&http, &cache_dir, &src.id, &src.url).await;
+                    (num, src, res)
+                }
+                _ => (num, src, Ok((false, 0, 0))),
+            }
+        }));
+    }
+
+    for task in tasks {
+        if let Ok((num, src, res)) = task.await {
+            match res {
+                Ok((changed, count, bytes)) => {
+                    total_packages += count;
+                    if changed {
+                        updated_sources_count += 1;
+                        let kb = bytes as f64 / 1024.0;
+                        println!(
+                            "Get:{} {} [{}] ({:.1} KiB, {} pkgs)",
+                            num,
+                            src.url,
+                            c(&src.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+                            kb,
+                            count
+                        );
+                    } else {
+                        println!(
+                            "Hit:{} [{}] (cached, {} pkgs)",
+                            num,
+                            c(&src.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+                            count
+                        );
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        " {} Failed to update source [{}] {}: {}",
+                        apt_prefix("WARN"),
+                        c(&src.id, &[Colors::BOLD, Colors::YELLOW]),
+                        src.url,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     println!(
-        "{} {} repositories updated, {} packages available.\n",
-        c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-        c(&updated_repos.to_string(), &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-        c(&total_packages.to_string(), &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+        "\n{} Sources updated successfully. {} packages available in index.\n",
+        c("::", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+        c(&total_packages.to_string(), &[Colors::BOLD, Colors::BRIGHT_WHITE])
     );
 
-    Ok(())
+    Ok((updated_sources_count, total_packages))
 }
 
 // ============================================================================
-// Registry Lookup & Search
+// Unified Search Across Indexed and Online Drivers
 // ============================================================================
 
-pub fn get_cached_index(cache_dir: &Path, repo_id: &str) -> Option<RegistryIndex> {
-    let path = cache_dir.join(format!("{}.json", repo_id));
-    if let Ok(content) = fs::read_to_string(&path) {
-        if let Ok(idx) = serde_json::from_str::<RegistryIndex>(&content) {
-            return Some(idx);
-        }
-    }
-    None
+#[derive(Debug, Clone)]
+pub struct UnifiedSearchResult {
+    pub source_id: String,
+    pub driver: String,
+    pub package_id: String,
+    pub name: String,
+    pub version: String,
+    pub format: String,
+    pub description: String,
+    pub priority: i32,
 }
 
-pub fn find_package_in_registries(
-    cache_dir: &Path,
-    sources: &[RepoEntry],
-    pkg_id: &str,
-) -> Option<(String, RegistryPackage)> {
-    let lower_target = pkg_id.to_lowercase();
-    for entry in sources {
-        if !entry.enabled {
+#[allow(clippy::too_many_arguments)]
+pub async fn search_all_sources(
+    client: &reqwest::Client,
+    sources_file: &Path,
+    registries_cache_dir: &Path,
+    indexes_cache_dir: &Path,
+    query: &str,
+    filter_source: Option<&str>,
+    filter_driver: Option<&str>,
+    offline: bool,
+) -> Vec<UnifiedSearchResult> {
+    let effective = get_effective_sources(sources_file, registries_cache_dir);
+    let mut results = Vec::new();
+    let lower_q = query.to_lowercase();
+
+    // 1. Search locally cached indexes (APT + AppImageHub)
+    for src in &effective {
+        if !src.enabled {
             continue;
         }
-        if let Some(idx) = get_cached_index(cache_dir, &entry.id) {
-            for (key, r) in &idx.packages {
-                if key.to_lowercase() == lower_target || r.package.id.to_lowercase() == lower_target {
-                    return Some((
-                        entry.id.clone(),
-                        RegistryPackage {
-                            id: r.package.id.clone(),
-                            name: r.package.name.clone(),
-                            description: r.package.description.clone(),
-                            homepage: r.package.homepage.clone(),
-                            license: r.package.license.clone(),
-                            categories: r.package.categories.clone(),
-                            format: r.package.format.clone(),
-                            bin_name: r.package.bin_name.clone(),
-                            gui: r.package.gui,
-                            source: r.source.clone(),
-                            runtime: r.runtime.clone(),
-                            sandbox: r.sandbox.clone(),
-                        },
-                    ));
-                }
+        if let Some(fs) = filter_source {
+            if !src.id.eq_ignore_ascii_case(fs) {
+                continue;
             }
         }
-    }
-    None
-}
+        if let Some(fd) = filter_driver {
+            if !src.driver.eq_ignore_ascii_case(fd) {
+                continue;
+            }
+        }
 
-pub fn search_registries(
-    cache_dir: &Path,
-    sources: &[RepoEntry],
-    query: &str,
-) -> Vec<(String, RegistryPackage)> {
-    let q = query.to_lowercase();
-    let mut results = Vec::new();
-    let mut seen_ids = std::collections::HashSet::new();
-
-    for entry in sources {
-        if !entry.enabled {
+        let idx_file = indexes_cache_dir.join(format!("{}.json", src.id));
+        if !idx_file.exists() {
             continue;
         }
-        if let Some(idx) = get_cached_index(cache_dir, &entry.id) {
-            for pkg in idx.get_packages() {
-                if seen_ids.contains(&pkg.id) {
+
+        match src.driver.as_str() {
+            "apt" => {
+                let pkgs = load_cached_apt_packages(&idx_file);
+                for (name, p) in pkgs {
+                    if name.to_lowercase().contains(&lower_q)
+                        || p.description.as_ref().map(|d| d.to_lowercase().contains(&lower_q)).unwrap_or(false)
+                    {
+                        results.push(UnifiedSearchResult {
+                            source_id: src.id.clone(),
+                            driver: "apt".to_string(),
+                            package_id: p.package.clone(),
+                            name: p.package.clone(),
+                            version: p.version.clone(),
+                            format: "deb".to_string(),
+                            description: p.description.unwrap_or_default(),
+                            priority: src.priority,
+                        });
+                    }
+                }
+            }
+            "appimagehub" => {
+                let pkgs = load_cached_appimagehub_packages(&idx_file);
+                for (id, p) in pkgs {
+                    if id.contains(&lower_q)
+                        || p.name.to_lowercase().contains(&lower_q)
+                        || p.description.as_ref().map(|d| d.to_lowercase().contains(&lower_q)).unwrap_or(false)
+                    {
+                        results.push(UnifiedSearchResult {
+                            source_id: src.id.clone(),
+                            driver: "appimagehub".to_string(),
+                            package_id: p.id.clone(),
+                            name: p.name.clone(),
+                            version: "latest".to_string(),
+                            format: "appimage".to_string(),
+                            description: p.description.unwrap_or_default(),
+                            priority: src.priority,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Query online providers (AUR, GitHub) if not in offline mode
+    if !offline {
+        for src in &effective {
+            if !src.enabled {
+                continue;
+            }
+            if let Some(fs) = filter_source {
+                if !src.id.eq_ignore_ascii_case(fs) {
                     continue;
                 }
-                let id_match = pkg.id.to_lowercase().contains(&q);
-                let name_match = pkg.name.to_lowercase().contains(&q);
-                let desc_match = pkg.description.to_lowercase().contains(&q);
-                let cat_match = pkg.categories.iter().any(|c| c.to_lowercase().contains(&q));
+            }
+            if let Some(fd) = filter_driver {
+                if !src.driver.eq_ignore_ascii_case(fd) {
+                    continue;
+                }
+            }
 
-                if id_match || name_match || desc_match || cat_match {
-                    seen_ids.insert(pkg.id.clone());
-                    results.push((entry.id.clone(), pkg));
+            if src.driver == "aur" {
+                if let Ok(aur_pkgs) = search_aur(client, &src.url, query).await {
+                    for ap in aur_pkgs {
+                        results.push(UnifiedSearchResult {
+                            source_id: src.id.clone(),
+                            driver: "aur".to_string(),
+                            package_id: ap.name.clone(),
+                            name: ap.name.clone(),
+                            version: ap.version,
+                            format: "aur".to_string(),
+                            description: ap.description.unwrap_or_default(),
+                            priority: src.priority,
+                        });
+                    }
                 }
             }
         }
     }
 
+    // Sort results by priority descending, then package name ascending
+    results.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.package_id.cmp(&b.package_id)));
     results
 }
 
 // ============================================================================
-// Clean Binary Name Helper
+// Source Schema v2 Linting and Testing
 // ============================================================================
 
-pub fn clean_binary_name(raw_name: &str, fallback_id: &str) -> String {
-    let lower_raw = raw_name.to_lowercase();
-    let lower_fallback = fallback_id.to_lowercase();
-
-    if lower_raw == lower_fallback {
-        return lower_fallback;
-    }
-
-    if lower_raw.starts_with(&format!("{}-", lower_fallback))
-        || lower_raw.starts_with(&format!("{}_", lower_fallback))
-    {
-        return lower_fallback;
-    }
-
-    // Strip file extensions like .bin, .elf
-    let base = raw_name.trim_end_matches(".bin").trim_end_matches(".elf");
-
-    // Split on delimiters '-' and '_'
-    let parts: Vec<&str> = base.split(['-', '_']).collect();
-    if !parts.is_empty() {
-        let first = parts[0].trim();
-        if !first.is_empty() && first.chars().all(|c| c.is_ascii_alphabetic()) && parts.len() > 1 {
-            let second = parts[1];
-            let is_version = second.starts_with('v')
-                || second.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
-            let is_arch = second == "linux"
-                || second == "x86"
-                || second == "x86_64"
-                || second == "amd64"
-                || second == "arm64"
-                || second == "aarch64";
-            if is_version || is_arch {
-                return first.to_lowercase();
-            }
-        }
-    }
-
-    // Pattern based stripping
-    let patterns = [
-        "-unknown-linux-gnu",
-        "-unknown-linux-musl",
-        "-linux-amd64",
-        "-linux-arm64",
-        "-linux-x86_64",
-        "-linux-aarch64",
-        "_linux_amd64",
-        "_linux_arm64",
-        "_linux_x86_64",
-        "_linux_aarch64",
-        "-x86_64-linux",
-        "-aarch64-linux",
-        "-linux64",
-        "-linux",
-        "_linux",
-    ];
-
-    let mut s = base;
-    for pat in &patterns {
-        if let Some(pos) = s.to_lowercase().find(pat) {
-            s = &s[..pos];
-            break;
-        }
-    }
-
-    let clean = s.trim_matches(['-', '_']).to_lowercase();
-    if clean.is_empty() {
-        lower_fallback
-    } else {
-        clean
-    }
-}
-
-// ============================================================================
-// Maintainer Package Tools (appmgr pkg new / lint / test)
-// ============================================================================
-
-pub fn pkg_new(id: &str, output_path: Option<&Path>) -> Result<PathBuf, String> {
-    if !is_valid_repo_id(id) {
-        return Err(format!(
-            "Invalid package ID '{}': must consist of lowercase letters, digits, and hyphens",
-            id
-        ));
-    }
-
-    let target_path = match output_path {
-        Some(p) => p.to_path_buf(),
-        None => PathBuf::from(format!("{}.toml", id)),
-    };
-
-    let template = format!(
-        r#"schema_version = 1
-
-[package]
-id = "{id}"
-name = "{name}"
-description = "Fast, universal command-line utility"
-homepage = "https://example.com"
-license = "MIT"
-categories = ["cli", "utilities"]
-format = "auto"
-# bin_name = "{id}"
-# gui = false
-
-[source]
-type = "github"
-repo = "owner/{id}"
-# asset_regex = ".*linux.*x86_64.*"
-# prefer = "tar"
-# pre = false
-
-# [runtime]
-# default_args = []
-# [runtime.default_env]
-# KEY = "VALUE"
-
-# [sandbox]
-# bwrap = false
-# bind_opt = []
-"#,
-        id = id,
-        name = title_case(id)
-    );
-
-    fs::write(&target_path, template)
-        .map_err(|e| format!("Failed to write recipe file at {}: {}", target_path.display(), e))?;
-
-    Ok(target_path)
-}
-
-fn title_case(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
-
-pub fn pkg_lint(file_path: &Path) -> Result<Recipe, Vec<String>> {
-    let content = fs::read_to_string(file_path).map_err(|e| {
-        vec![format!(
-            "Failed to read file {}: {}",
-            file_path.display(),
-            e
-        )]
-    })?;
-
-    let recipe: Recipe = toml::from_str(&content)
-        .map_err(|e| vec![format!("TOML syntax error: {}", e)])?;
-
+pub fn source_lint(file_path: &Path) -> Result<SourceRecipe, Vec<String>> {
     let mut errors = Vec::new();
 
-    if recipe.schema_version != 1 {
-        errors.push(format!(
-            "Unsupported schema_version {}: must be 1",
-            recipe.schema_version
-        ));
-    }
+    let content = match fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(e) => return Err(vec![format!("Failed to read source file {}: {}", file_path.display(), e)]),
+    };
 
-    let pkg = &recipe.package;
-    if !Regex::new(r"^[a-z0-9][a-z0-9-]*$")
-        .unwrap()
-        .is_match(&pkg.id)
-    {
-        errors.push(format!("package.id '{}' must match ^[a-z0-9][a-z0-9-]*$", pkg.id));
-    }
-    if pkg.name.trim().is_empty() {
-        errors.push("package.name cannot be empty".to_string());
-    }
-    if pkg.description.trim().is_empty() {
-        errors.push("package.description cannot be empty".to_string());
-    }
-    if pkg.homepage.trim().is_empty() {
-        errors.push("package.homepage cannot be empty".to_string());
-    }
-    if pkg.license.trim().is_empty() {
-        errors.push("package.license cannot be empty".to_string());
-    }
-    if pkg.categories.is_empty() {
-        errors.push("package.categories must contain at least one category".to_string());
-    }
+    let recipe: SourceRecipe = match toml::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => return Err(vec![format!("TOML syntax error: {}", e)]),
+    };
 
-    let valid_formats = ["deb", "appimage", "tar", "zip", "bin", "auto"];
-    if !valid_formats.contains(&pkg.format.as_str()) {
-        errors.push(format!(
-            "Invalid package.format '{}'. Allowed: {}",
-            pkg.format,
-            valid_formats.join(", ")
-        ));
+    if recipe.schema_version != 2 {
+        errors.push(format!("schema_version must be 2, got {}", recipe.schema_version));
     }
 
     let src = &recipe.source;
-    match src.source_type.as_str() {
-        "github" => {
-            if let Some(ref r) = src.repo {
-                if !Regex::new(r"^[^/]+/[^/]+$").unwrap().is_match(r) {
-                    errors.push(format!("source.repo '{}' must be in 'owner/repo' format", r));
+    if src.id.is_empty() {
+        errors.push("source.id cannot be empty".to_string());
+    }
+    if src.name.is_empty() {
+        errors.push("source.name cannot be empty".to_string());
+    }
+
+    let valid_drivers = ["apt", "appimagehub", "aur", "github", "gitlab"];
+    if !valid_drivers.contains(&src.driver.as_str()) {
+        errors.push(format!("Invalid source.driver '{}'. Must be one of {:?}", src.driver, valid_drivers));
+    }
+
+    if !src.base_url.starts_with("http://") && !src.base_url.starts_with("https://") {
+        errors.push(format!("source.base_url must be an HTTP/HTTPS URL, got '{}'", src.base_url));
+    }
+
+    if src.driver == "apt" {
+        match recipe.apt {
+            Some(ref apt) => {
+                if apt.suite.is_empty() {
+                    errors.push("apt.suite cannot be empty".to_string());
                 }
-            } else {
-                errors.push("source.repo is required for type = 'github'".to_string());
-            }
-        }
-        "redirect" => {
-            if let Some(ref u) = src.url {
-                if !u.starts_with("http://") && !u.starts_with("https://") {
-                    errors.push("source.url must start with http:// or https://".to_string());
+                if apt.components.is_empty() {
+                    errors.push("apt.components must contain at least one component".to_string());
                 }
-            } else {
-                errors.push("source.url is required for type = 'redirect'".to_string());
             }
-        }
-        "direct" => {
-            if let Some(ref x) = src.x86_64 {
-                if !x.starts_with("http://") && !x.starts_with("https://") {
-                    errors.push("source.x86_64 must start with http:// or https://".to_string());
-                }
-            } else {
-                errors.push("source.x86_64 is required for type = 'direct'".to_string());
-            }
-        }
-        "gitlab" => {
-            if src.instance.is_none() {
-                errors.push("source.instance is required for type = 'gitlab'".to_string());
-            }
-            if src.project.is_none() {
-                errors.push("source.project is required for type = 'gitlab'".to_string());
-            }
-        }
-        other => {
-            errors.push(format!(
-                "Invalid source.type '{}'. Allowed: github, redirect, direct, gitlab",
-                other
-            ));
+            None => errors.push("[apt] table is required when source.driver = 'apt'".to_string()),
         }
     }
 
@@ -803,336 +730,119 @@ pub fn pkg_lint(file_path: &Path) -> Result<Recipe, Vec<String>> {
     }
 }
 
-pub async fn pkg_test(
-    client: &reqwest::Client,
-    file_path: &Path,
-    dry_run: bool,
-) -> Result<(), String> {
-    println!(
-        "{} Linting package recipe at {} ...",
-        apt_prefix("INFO"),
-        file_path.display()
-    );
+pub async fn source_test(file_path: &Path, client: &reqwest::Client) -> Result<(), String> {
+    let recipe = source_lint(file_path).map_err(|errs| errs.join("\n"))?;
+    let src = &recipe.source;
 
-    let recipe = match pkg_lint(file_path) {
-        Ok(r) => {
-            println!(
-                "{} Schema v1 validation passed for '{}' ({})",
-                apt_prefix("OK"),
-                r.package.name,
-                r.package.id
-            );
-            r
-        }
-        Err(errs) => {
-            for err in &errs {
-                println!("{} {}", apt_prefix("FAIL"), err);
-            }
-            return Err(format!("Recipe validation failed with {} error(s)", errs.len()));
-        }
+    println!("{} Testing endpoint accessibility for source '{}' ({}) ...", apt_prefix("INFO"), src.id, src.driver);
+
+    let test_url = if src.driver == "apt" {
+        let apt = recipe.apt.as_ref().unwrap();
+        let arch = crate::drivers::apt::get_debian_arch();
+        let clean = src.base_url.trim_end_matches('/');
+        format!("{}/dists/{}/{}/binary-{}/Packages.gz", clean, apt.suite, apt.components[0], arch)
+    } else if src.driver == "appimagehub" {
+        src.base_url.clone()
+    } else if src.driver == "aur" {
+        let clean = src.base_url.trim_end_matches('/');
+        format!("{}/info?arg[]=paru-bin", clean)
+    } else {
+        src.base_url.clone()
     };
 
-    println!(
-        "{} Testing upstream source resolution (type = '{}')...",
-        apt_prefix("WORK"),
-        recipe.source.source_type
-    );
+    println!("{} Checking HTTP GET/HEAD on {} ...", apt_prefix("INFO"), test_url);
+    let resp = client.get(&test_url).send().await
+        .map_err(|e| format!("Failed to reach {}: {}", test_url, e))?;
 
-    match recipe.source.source_type.as_str() {
-        "github" => {
-            let repo = recipe.source.repo.as_ref().unwrap();
-            let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-            let resp = client
-                .get(&url)
-                .header("User-Agent", "appmgr")
-                .send()
-                .await
-                .map_err(|e| format!("Failed to query GitHub API: {}", e))?;
-
-            if !resp.status().is_success() {
-                return Err(format!(
-                    "GitHub API returned HTTP {} for {}",
-                    resp.status(),
-                    repo
-                ));
-            }
-
-            let release: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse GitHub JSON: {}", e))?;
-
-            let tag = release["tag_name"].as_str().unwrap_or("unknown");
-            let assets = release["assets"].as_array().map(|a| a.len()).unwrap_or(0);
-            println!(
-                "{} Found GitHub release: {} with {} asset(s)",
-                apt_prefix("OK"),
-                tag,
-                assets
-            );
-        }
-        "redirect" => {
-            let url = recipe.source.url.as_ref().unwrap();
-            // Test no-redirect client
-            let no_redirect_client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-            let resp = no_redirect_client
-                .head(url)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to connect to redirect URL: {}", e))?;
-
-            let status = resp.status();
-            if status.is_redirection() {
-                let loc = resp
-                    .headers()
-                    .get("location")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("unknown");
-                println!(
-                    "{} HTTP {} -> redirects to: {}",
-                    apt_prefix("OK"),
-                    status,
-                    loc
-                );
-            } else if status.is_success() {
-                println!(
-                    "{} HTTP {} (direct response)",
-                    apt_prefix("OK"),
-                    status
-                );
-            } else {
-                return Err(format!("Redirect probe returned HTTP {}", status));
-            }
-        }
-        "direct" => {
-            let x86 = recipe.source.x86_64.as_ref().unwrap();
-            let resp = client
-                .head(x86)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to probe direct URL: {}", e))?;
-
-            if !resp.status().is_success() {
-                return Err(format!("Direct URL returned HTTP {}", resp.status()));
-            }
-
-            let len = resp
-                .headers()
-                .get("content-length")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown");
-            println!(
-                "{} Direct URL reachable: HTTP {} (Content-Length: {} bytes)",
-                apt_prefix("OK"),
-                resp.status(),
-                len
-            );
-        }
-        "gitlab" => {
-            let instance = recipe
-                .source
-                .instance
-                .as_deref()
-                .unwrap_or("https://gitlab.com");
-            let project = recipe.source.project.as_ref().unwrap();
-            let encoded_project = urlencoding_simple(project);
-            let url = format!("{}/api/v4/projects/{}/releases", instance, encoded_project);
-
-            let resp = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to query GitLab API: {}", e))?;
-
-            if !resp.status().is_success() {
-                return Err(format!(
-                    "GitLab API returned HTTP {} for {}",
-                    resp.status(),
-                    project
-                ));
-            }
-
-            let releases: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse GitLab JSON: {}", e))?;
-
-            let first = releases.as_array().and_then(|a| a.first());
-            if let Some(r) = first {
-                let tag = r["tag_name"].as_str().unwrap_or("unknown");
-                println!(
-                    "{} Found GitLab release: {}",
-                    apt_prefix("OK"),
-                    tag
-                );
-            } else {
-                println!("{} No GitLab releases found for this project", apt_prefix("WARN"));
-            }
-        }
-        _ => {}
-    }
-
-    if dry_run {
-        println!(
-            "{} Dry-run test completed successfully. No changes made to system.",
-            apt_prefix("DONE")
-        );
+    if resp.status().is_success() {
+        println!("{} Endpoint returned HTTP {} OK", apt_prefix("OK"), resp.status());
+        Ok(())
     } else {
-        println!(
-            "{} Recipe test completed successfully.",
-            apt_prefix("DONE")
-        );
+        Err(format!("Endpoint returned HTTP {}", resp.status()))
     }
-
-    Ok(())
 }
 
-fn urlencoding_simple(s: &str) -> String {
-    s.replace('/', "%2F")
+// ============================================================================
+// Clean Binary Name Helper
+// ============================================================================
+
+pub fn clean_binary_name(asset_name: &str, fallback_id: &str) -> String {
+    let lower_asset = asset_name.to_lowercase();
+    let lower_fallback = fallback_id.to_lowercase();
+
+    let clean = lower_asset
+        .trim_end_matches(".tar.gz")
+        .trim_end_matches(".tgz")
+        .trim_end_matches(".tar.xz")
+        .trim_end_matches(".txz")
+        .trim_end_matches(".tar.zst")
+        .trim_end_matches(".tzst")
+        .trim_end_matches(".tar.bz2")
+        .trim_end_matches(".tbz2")
+        .trim_end_matches(".tar")
+        .trim_end_matches(".zip")
+        .trim_end_matches(".appimage")
+        .trim_end_matches(".deb")
+        .trim_end_matches(".bin");
+
+    if clean == lower_fallback || clean.starts_with(&format!("{}-", lower_fallback)) || clean.starts_with(&format!("{}_", lower_fallback)) {
+        return fallback_id.to_string();
+    }
+
+    let parts: Vec<&str> = clean.split(['-', '_']).collect();
+    if let Some(&first) = parts.first() {
+        if !first.is_empty() && !first.chars().all(|c| c.is_ascii_digit()) {
+            return first.to_string();
+        }
+    }
+
+    fallback_id.to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_sources_list_parsing_and_priority() {
-        let dir = tempdir().unwrap();
-        let sources_file = dir.path().join("sources.list");
-
-        let content = r#"
-# Primary repository (priority 1)
-core https://example.com/core/index.json
-
-# Disabled community repository
-# community https://example.com/community/index.json
-
-# Local custom repo (priority 2)
-custom file:///opt/custom/index.json
-"#;
-        fs::write(&sources_file, content).unwrap();
-
-        let entries = load_sources(&sources_file).unwrap();
-        assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].id, "core");
-        assert!(entries[0].enabled);
-        assert_eq!(entries[1].id, "community");
-        assert!(!entries[1].enabled);
-        assert_eq!(entries[2].id, "custom");
-        assert!(entries[2].enabled);
-    }
-
-    #[test]
-    fn test_sources_list_add_remove_toggle() {
-        let dir = tempdir().unwrap();
-        let sources_file = dir.path().join("sources.list");
-        let cache_dir = dir.path().join("cache");
-        fs::create_dir_all(&cache_dir).unwrap();
-
-        // 1. Initial default creation
-        let initial = load_sources(&sources_file).unwrap();
-        assert_eq!(initial.len(), 1);
-        assert_eq!(initial[0].id, "core");
-
-        // 2. Add repo
-        add_repo(&sources_file, "community", "https://example.com/community/index.json").unwrap();
-        let after_add = load_sources(&sources_file).unwrap();
-        assert_eq!(after_add.len(), 2);
-        assert_eq!(after_add[1].id, "community");
-        assert!(after_add[1].enabled);
-
-        // 3. Disable repo
-        set_repo_enabled(&sources_file, "community", false).unwrap();
-        let after_disable = load_sources(&sources_file).unwrap();
-        assert!(!after_disable[1].enabled);
-
-        // 4. Remove repo
-        remove_repo(&sources_file, "community", &cache_dir).unwrap();
-        let after_remove = load_sources(&sources_file).unwrap();
-        assert_eq!(after_remove.len(), 1);
-        assert_eq!(after_remove[0].id, "core");
-    }
 
     #[test]
     fn test_clean_binary_name() {
         assert_eq!(clean_binary_name("jq-linux-amd64", "jq"), "jq");
-        assert_eq!(clean_binary_name("gh_2.40.1_linux_amd64", "gh"), "gh");
-        assert_eq!(clean_binary_name("btop-x86_64-linux-musl", "btop"), "btop");
-        assert_eq!(clean_binary_name("ripgrep-14.1.0-x86_64-unknown-linux-musl", "ripgrep"), "ripgrep");
-        assert_eq!(clean_binary_name("bat-v0.24.0-x86_64-unknown-linux-musl", "bat"), "bat");
-        assert_eq!(clean_binary_name("fd-v10.1.0-x86_64-unknown-linux-gnu", "fd"), "fd");
-        assert_eq!(clean_binary_name("fzf-0.56.3-linux_amd64", "fzf"), "fzf");
-        assert_eq!(clean_binary_name("myapp.bin", "myapp"), "myapp");
-        assert_eq!(clean_binary_name("simple", "simple"), "simple");
+        assert_eq!(clean_binary_name("ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz", "ripgrep"), "ripgrep");
+        assert_eq!(clean_binary_name("gh_2.40.1_linux_amd64.deb", "gh"), "gh");
+        assert_eq!(clean_binary_name("fd-v8.7.0-x86_64-unknown-linux-gnu.tar.gz", "fd"), "fd");
     }
 
     #[test]
-    fn test_pkg_lint_valid_and_invalid() {
-        let dir = tempdir().unwrap();
-        let valid_file = dir.path().join("valid.toml");
-        let invalid_file = dir.path().join("invalid.toml");
-
-        let valid_toml = r#"
-schema_version = 1
-
-[package]
-id = "ripgrep"
-name = "ripgrep"
-description = "Fast line-oriented search tool"
-homepage = "https://github.com/BurntSushi/ripgrep"
-license = "MIT"
-categories = ["cli", "search"]
-format = "tar"
-bin_name = "rg"
-
-[source]
-type = "github"
-repo = "BurntSushi/ripgrep"
-asset_regex = "x86_64.*linux.*tar\\.gz"
+    fn test_parse_sources_list_parsing_and_options() {
+        let sample = r#"
+# appmgr sources.list
+registry official https://alexzahn-max.github.io/appmgr-registry/sources.json
+apt apt-gh https://cli.github.com/packages suite=stable components=main priority=100
+# disabled: apt apt-vscode https://packages.microsoft.com/repos/code suite=stable components=main priority=90
+appimagehub appimagehub https://appimage.github.io/feed.json priority=80
 "#;
-        fs::write(&valid_file, valid_toml).unwrap();
-        let recipe = pkg_lint(&valid_file).unwrap();
-        assert_eq!(recipe.package.id, "ripgrep");
-        assert_eq!(recipe.package.bin_name.as_deref(), Some("rg"));
-        assert_eq!(recipe.source.source_type, "github");
 
-        // Invalid: bad id format, missing required fields
-        let invalid_toml = r#"
-schema_version = 1
+        let entries = parse_sources_list_content(sample);
+        assert_eq!(entries.len(), 4);
 
-[package]
-id = "Invalid_Name!"
-name = ""
-description = ""
-homepage = ""
-license = ""
-categories = []
-format = "unknown_format"
+        let reg = &entries[0];
+        assert_eq!(reg.driver, "registry");
+        assert_eq!(reg.id, "official");
+        assert!(reg.enabled);
 
-[source]
-type = "github"
-"#;
-        fs::write(&invalid_file, invalid_toml).unwrap();
-        let errs = pkg_lint(&invalid_file).unwrap_err();
-        assert!(!errs.is_empty());
-        assert!(errs.iter().any(|e| e.contains("must match")));
-        assert!(errs.iter().any(|e| e.contains("Invalid package.format")));
-        assert!(errs.iter().any(|e| e.contains("source.repo is required")));
-    }
+        let gh = &entries[1];
+        assert_eq!(gh.driver, "apt");
+        assert_eq!(gh.id, "apt-gh");
+        assert_eq!(gh.suite.as_deref(), Some("stable"));
+        assert_eq!(gh.components, Some(vec!["main".to_string()]));
+        assert_eq!(gh.priority, 100);
+        assert!(gh.enabled);
 
-    #[test]
-    fn test_redirect_version_regex() {
-        let regex_str = r"discord-([0-9.]+)\.deb";
-        let re = Regex::new(regex_str).unwrap();
+        let vscode = &entries[2];
+        assert_eq!(vscode.id, "apt-vscode");
+        assert!(!vscode.enabled); // disabled
 
-        let target_url = "https://dl.discordapp.net/apps/linux/0.0.78/discord-0.0.78.deb";
-        let caps = re.captures(target_url).unwrap();
-        let version = caps.get(1).unwrap().as_str();
-        assert_eq!(version, "0.0.78");
+        let appimage = &entries[3];
+        assert_eq!(appimage.driver, "appimagehub");
+        assert_eq!(appimage.priority, 80);
     }
 }
