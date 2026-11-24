@@ -1,8 +1,9 @@
 use crate::config::Config;
 use crate::db::PackageRecord;
 use crate::desktop::{create_desktop_entry, is_gui_binary};
+use crate::formats::{connect_package_binaries, StagingDirGuard};
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
@@ -119,137 +120,138 @@ impl ArchivePackage {
         Ok((pkg_id, version, desc, file_size))
     }
 
+    #[allow(dead_code)]
     pub fn install(
         &self,
         force: bool,
         env: Option<HashMap<String, String>>,
         args: Option<Vec<String>>,
     ) -> Result<PackageRecord, String> {
+        self.install_with_owned(force, env, args, &[])
+    }
+
+    pub fn install_with_owned(
+        &self,
+        force: bool,
+        env: Option<HashMap<String, String>>,
+        args: Option<Vec<String>>,
+        owned_launchers: &[PathBuf],
+    ) -> Result<PackageRecord, String> {
         let (pkg_id, version, desc, file_size) = self.read_metadata()?;
         let app_dir = self.config.apps_dir.join(&pkg_id);
 
-        if app_dir.exists() {
-            if force {
-                let _ = fs::remove_dir_all(&app_dir);
-            } else {
-                return Err(format!(
-                    "Package directory already exists: {}. Use -f to overwrite.",
-                    app_dir.display()
-                ));
-            }
+        if app_dir.exists() && !force {
+            return Err(format!(
+                "Package directory already exists: {}. Use -f to overwrite.",
+                app_dir.display()
+            ));
         }
-        fs::create_dir_all(&app_dir)
-            .map_err(|e| format!("Failed to create destination dir: {}", e))?;
 
-        let temp_extract_dir = tempfile::tempdir()
-            .map_err(|e| format!("Failed to create staging directory: {}", e))?;
-        let staging_path = temp_extract_dir.path();
+        // 1. Stage extraction on the same filesystem as apps_dir
+        let mut staging = StagingDirGuard::new(&self.config.apps_dir, &pkg_id)?;
+        let stage_path = staging.path.clone();
 
-        // 1. Safe extraction with Path Traversal (Tar/Zip Slip) Defense
         match self.kind {
             ArchiveKind::Zip => {
-                Self::extract_zip_safe(&self.file_path, staging_path)?;
+                Self::extract_zip_safe(&self.file_path, &stage_path)?;
             }
             ArchiveKind::TarGz => {
                 let file = File::open(&self.file_path)
                     .map_err(|e| format!("Failed to open file: {}", e))?;
                 let decoder = flate2::read::GzDecoder::new(file);
-                Self::extract_tar_safe(decoder, staging_path)?;
+                Self::extract_tar_safe(decoder, &stage_path)?;
             }
             ArchiveKind::TarXz => {
                 let file = File::open(&self.file_path)
                     .map_err(|e| format!("Failed to open file: {}", e))?;
                 let decoder = xz2::read::XzDecoder::new(file);
-                Self::extract_tar_safe(decoder, staging_path)?;
+                Self::extract_tar_safe(decoder, &stage_path)?;
             }
             ArchiveKind::TarZst => {
                 let file = File::open(&self.file_path)
                     .map_err(|e| format!("Failed to open file: {}", e))?;
                 let decoder = zstd::Decoder::new(file)
                     .map_err(|e| format!("Failed to init zstd decoder: {}", e))?;
-                Self::extract_tar_safe(decoder, staging_path)?;
+                Self::extract_tar_safe(decoder, &stage_path)?;
             }
             ArchiveKind::TarBz2 => {
                 let file = File::open(&self.file_path)
                     .map_err(|e| format!("Failed to open file: {}", e))?;
                 let decoder = bzip2::read::BzDecoder::new(file);
-                Self::extract_tar_safe(decoder, staging_path)?;
+                Self::extract_tar_safe(decoder, &stage_path)?;
             }
             ArchiveKind::TarPlain => {
                 let file = File::open(&self.file_path)
                     .map_err(|e| format!("Failed to open file: {}", e))?;
-                Self::extract_tar_safe(file, staging_path)?;
+                Self::extract_tar_safe(file, &stage_path)?;
             }
         }
 
-        // 2. Check for Single Root Directory (auto-collapse --strip-components=1)
-        let root_to_copy = Self::resolve_single_root(staging_path);
+        // 2. Collapse single root folder if present
+        let root_to_swap = Self::resolve_single_root(&stage_path);
 
-        // 3. Move extracted files into app_dir
-        Self::copy_dir_all(&root_to_copy, &app_dir)?;
+        // 3. Validate executables and reject source-only archives BEFORE swapping
+        let (primary_bin, secondary_bins) = Self::discover_executables(&root_to_swap, &pkg_id)?;
+        let rel_primary = primary_bin
+            .strip_prefix(&root_to_swap)
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_path_buf();
+        let mut secondary_rels = Vec::new();
+        for sec in &secondary_bins {
+            if let Ok(rel) = sec.strip_prefix(&root_to_swap) {
+                secondary_rels.push(rel.to_path_buf());
+            }
+        }
+        let is_gui = is_gui_binary(&primary_bin);
 
-        // 4. Discover Executables and Check Against Source Code Only Archives
-        let primary_bin = Self::discover_and_rank_binaries(&app_dir, &pkg_id)?;
+        // 4. Atomic swap into final app_dir
+        staging.commit_swap(&root_to_swap, &app_dir, force)?;
 
-        // 5. Setup Launcher Script in PATH
+        // 5. Setup declarative launchers via launcher.rs
         let launcher_path = self.config.bin_dir.join(&pkg_id);
-        let rel_bin = primary_bin
-            .strip_prefix(&app_dir)
-            .map_err(|e| format!("Path error: {}", e))?;
-
-        let mut lib_dirs = Vec::new();
-        for cand in &["lib", "lib64", "usr/lib", "usr/lib64"] {
-            if app_dir.join(cand).exists() {
-                lib_dirs.push(format!("$APP_ROOT/{}", cand));
-            }
-        }
-        let extra_ld = if lib_dirs.is_empty() {
-            String::new()
-        } else {
-            format!(":{}", lib_dirs.join(":"))
-        };
-
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
+        let fmt_str = match self.kind {
+            ArchiveKind::Zip => "zip",
+            _ => "tar",
+        };
+        let now = chrono::Local::now().to_rfc3339();
 
-        let env_block = crate::sandbox::format_env_exports(&env_map)?;
-        let args_block = format!("\n{}", crate::sandbox::format_persistent_args(&args_vec));
-
-        let fmt_name = match self.kind {
-            ArchiveKind::Zip => "Zip",
-            _ => "Tar",
+        let mut record = PackageRecord {
+            id: pkg_id.clone(),
+            name: pkg_id.clone(),
+            version,
+            format: fmt_str.to_string(),
+            mode: self.config.mode.clone(),
+            install_date: now,
+            install_dir: app_dir,
+            source_file: Some(self.file_path.to_string_lossy().to_string()),
+            entrypoint: Some(rel_primary),
+            binaries: vec![launcher_path.clone()],
+            desktop_files: Vec::new(),
+            icons: Vec::new(),
+            installed_files_count: None,
+            total_size_bytes: Some(file_size),
+            is_gui: Some(is_gui),
+            description: Some(desc.clone()),
+            repo: self.repo.clone(),
+            tag: self.tag.clone(),
+            etag: None,
+            asset_pattern: None,
+            env: env_map,
+            args: args_vec,
+            pinned: false,
+            ..Default::default()
         };
 
-        let script = format!(
-            r#"#!/usr/bin/env bash
-# Wrapper created by appmgr for {pkg_id} ({fmt_name} binary)
-APP_ROOT={app_dir}
-export PATH="$APP_ROOT/bin:$APP_ROOT/usr/bin:$APP_ROOT:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/lib{extra_ld}:${{LD_LIBRARY_PATH}}"
-export XDG_DATA_DIRS="$APP_ROOT/share:$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"{env_block}
-{args_block}
-exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
-"#,
-            pkg_id = pkg_id,
-            fmt_name = fmt_name,
-            app_dir = crate::sandbox::posix_quote(&app_dir.to_string_lossy()),
-            rel_bin = crate::sandbox::posix_quote(&rel_bin.to_string_lossy()),
-            extra_ld = extra_ld,
-            env_block = env_block,
-            args_block = args_block,
-        );
+        connect_package_binaries(
+            &mut record,
+            &self.config.bin_dir,
+            &secondary_rels,
+            owned_launchers,
+        )?;
 
-        if let Some(parent) = launcher_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        fs::write(&launcher_path, script)
-            .map_err(|e| format!("Failed to write launcher: {}", e))?;
-        fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to chmod launcher: {}", e))?;
-
-        // 6. GUI Desktop & Icon Setup
-        let is_gui = is_gui_binary(&primary_bin);
-        let mut desktop_files = Vec::new();
+        // 6. GUI Desktop Entry Setup
         if is_gui {
             let dt_path = self
                 .config
@@ -265,45 +267,14 @@ exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
             )
             .is_ok()
             {
-                desktop_files.push(dt_path);
+                record.desktop_files.push(dt_path);
             }
         }
 
-        let fmt_str = match self.kind {
-            ArchiveKind::Zip => "zip",
-            _ => "tar",
-        };
-
-        let now = chrono::Local::now().to_rfc3339();
-        Ok(PackageRecord {
-            id: pkg_id.clone(),
-            name: pkg_id,
-            version,
-            format: fmt_str.to_string(),
-            mode: self.config.mode.clone(),
-            install_date: now,
-            install_dir: app_dir,
-            source_file: Some(self.file_path.to_string_lossy().to_string()),
-            binaries: vec![launcher_path],
-            desktop_files,
-            icons: Vec::new(),
-            installed_files_count: None,
-            total_size_bytes: Some(file_size),
-            is_gui: Some(is_gui),
-            description: Some(desc),
-            repo: self.repo.clone(),
-            tag: self.tag.clone(),
-            etag: None,
-            asset_pattern: None,
-            env: env_map,
-            args: args_vec,
-            pinned: false,
-            ..Default::default()
-        })
+        Ok(record)
     }
 
     pub fn is_path_safe(dest: &Path, target: &Path) -> bool {
-        // Prevent Path Traversal (Tar Slip / Zip Slip)
         for comp in target.components() {
             match comp {
                 Component::ParentDir => return false,
@@ -390,7 +361,17 @@ exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
         if let Ok(entries) = fs::read_dir(staging_dir) {
             let valid_entries: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
             if valid_entries.len() == 1 && valid_entries[0].is_dir() {
-                return valid_entries[0].clone();
+                let name = valid_entries[0]
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_lowercase();
+                if !matches!(
+                    name.as_str(),
+                    "bin" | "usr" | "lib" | "lib64" | "share" | "opt" | "etc" | "sbin"
+                ) {
+                    return valid_entries[0].clone();
+                }
             }
         }
         staging_dir.to_path_buf()
@@ -439,6 +420,14 @@ exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
     }
 
     pub fn discover_and_rank_binaries(app_dir: &Path, pkg_id: &str) -> Result<PathBuf, String> {
+        let (primary, _) = Self::discover_executables(app_dir, pkg_id)?;
+        Ok(primary)
+    }
+
+    pub fn discover_executables(
+        app_dir: &Path,
+        pkg_id: &str,
+    ) -> Result<(PathBuf, Vec<PathBuf>), String> {
         let mut candidates = Vec::new();
         let mut has_source_indicators = false;
 
@@ -474,7 +463,7 @@ exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
             );
         }
 
-        // Rank binaries: prefer exact pkg_id match, ignore helpers (updater, crashreporter)
+        candidates.sort();
         let ignored_helpers = ["crashreporter", "updater", "elevate", "uninstall"];
         let mut best_cand = candidates[0].clone();
         let mut best_score = -100;
@@ -503,7 +492,33 @@ exec "$APP_ROOT/"{rel_bin} "${{PERSISTENT_ARGS[@]}}" "$@"
             }
         }
 
-        Ok(best_cand)
+        let mut seen_names = BTreeSet::new();
+        if let Some(p_name) = best_cand.file_name().and_then(|n| n.to_str()) {
+            seen_names.insert(p_name.to_string());
+        }
+
+        let bin_dir = app_dir.join("bin");
+        let usr_bin_dir = app_dir.join("usr/bin");
+        let mut secondary = Vec::new();
+        for cand in &candidates {
+            if *cand == best_cand {
+                continue;
+            }
+            let in_bin_dir = cand.starts_with(&bin_dir) || cand.starts_with(&usr_bin_dir);
+            if !in_bin_dir {
+                continue;
+            }
+            let name = cand.file_name().unwrap_or_default().to_string_lossy();
+            let lower = name.to_lowercase();
+            if ignored_helpers.iter().any(|h| lower.contains(h)) {
+                continue;
+            }
+            if seen_names.insert(name.to_string()) {
+                secondary.push(cand.clone());
+            }
+        }
+
+        Ok((best_cand, secondary))
     }
 
     pub fn is_executable_file(path: &Path) -> bool {

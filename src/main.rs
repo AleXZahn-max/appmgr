@@ -8,8 +8,8 @@ mod doctor;
 mod drivers;
 mod formats;
 mod github;
+mod launcher;
 mod registry;
-mod sandbox;
 #[cfg(feature = "self-update")]
 mod self_update;
 mod ui;
@@ -49,7 +49,6 @@ fn resolve_effective_color_mode(
 
 #[tokio::main]
 async fn main() {
-    // Global signal handler for graceful Ctrl+C cancellation
     tokio::spawn(async {
         let _ = tokio::signal::ctrl_c().await;
         ui::restore_cursor();
@@ -139,7 +138,6 @@ async fn main() {
                 .await
         }
         Commands::Update => core.sync_databases().await,
-        Commands::Repo { command } => core.repo_manage(command),
         Commands::Source { command } => core.source_manage(command).await,
         Commands::Deps {
             app,

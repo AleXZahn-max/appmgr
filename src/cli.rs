@@ -153,15 +153,10 @@ pub enum Commands {
     Update,
 
     #[command(
+        alias = "repo",
         alias = "sources",
-        about = "Manage software sources and repositories in sources.list"
+        about = "Manage, validate, and test package sources and recipes (Schema v2)"
     )]
-    Repo {
-        #[command(subcommand)]
-        command: RepoCommands,
-    },
-
-    #[command(about = "Validate and test source definitions (Schema v2)")]
     Source {
         #[command(subcommand)]
         command: SourceCommands,
@@ -216,7 +211,7 @@ pub enum Commands {
 
     #[command(
         alias = "up",
-        about = "Check and upgrade packages from GitHub Releases and registries"
+        about = "Check and upgrade packages from GitHub Releases, APT, and AppImageHub"
     )]
     Upgrade {
         #[arg(help = "Specific application to upgrade (optional)")]
@@ -444,46 +439,52 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RepoCommands {
-    #[command(about = "List configured repositories in sources.list")]
+pub enum SourceCommands {
+    #[command(about = "List configured sources in sources.list")]
     List {
         #[arg(long = "json", help = "Output machine-readable JSON")]
         json: bool,
     },
-    #[command(about = "Add a repository to sources.list")]
+    #[command(about = "Add a source to sources.list")]
     Add {
         #[arg(help = "Driver or registry type (apt, appimagehub, aur, github, registry)")]
         driver: String,
-        #[arg(help = "Repository identifier (e.g. core, my-apt)")]
+        #[arg(help = "Source identifier (e.g. core, my-apt)")]
         id: String,
-        #[arg(help = "Repository URL or index endpoint")]
+        #[arg(help = "Source URL or index endpoint")]
         url: String,
         #[arg(long = "suite", help = "Debian suite / distribution branch (for apt)")]
         suite: Option<String>,
-        #[arg(long = "components", help = "Debian components (for apt)")]
+        #[arg(
+            long = "components",
+            help = "Debian components (comma or space separated)"
+        )]
         components: Option<String>,
         #[arg(long = "priority", help = "Priority ranking (0..1000)")]
         priority: Option<i32>,
     },
-    #[command(about = "Remove a repository from sources.list and delete its cache")]
+    #[command(about = "Remove a source from sources.list and delete its cache")]
     Remove {
-        #[arg(help = "Repository identifier to remove")]
+        #[arg(help = "Source identifier to remove")]
         id: String,
     },
-    #[command(about = "Enable a previously disabled repository")]
+    #[command(about = "Enable a previously disabled source")]
     Enable {
-        #[arg(help = "Repository identifier to enable")]
+        #[arg(help = "Source identifier to enable")]
         id: String,
     },
-    #[command(about = "Disable a repository without deleting its configuration")]
+    #[command(about = "Disable a source without deleting its configuration")]
     Disable {
-        #[arg(help = "Repository identifier to disable")]
+        #[arg(help = "Source identifier to disable")]
         id: String,
     },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum SourceCommands {
+    #[command(about = "Generate a new Schema v2 source recipe template")]
+    New {
+        #[arg(help = "Source ID for the new recipe")]
+        id: String,
+        #[arg(short = 'o', long = "output", help = "Destination TOML file path")]
+        output: Option<String>,
+    },
     #[command(about = "Lint and validate a source definition TOML against Schema v2")]
     Lint {
         #[arg(help = "Path to source TOML file")]
@@ -493,6 +494,11 @@ pub enum SourceCommands {
     Test {
         #[arg(help = "Path to source TOML file")]
         file: String,
+        #[arg(
+            long = "dry-run",
+            help = "Validate recipe and print endpoints without network checks"
+        )]
+        dry_run: bool,
     },
 }
 
@@ -514,7 +520,7 @@ pub enum PkgCommands {
     Test {
         #[arg(help = "Path to TOML recipe file")]
         file: String,
-        #[arg(long = "dry-run", help = "Emulate checks without modifying system")]
+        #[arg(long = "dry-run", help = "Emulate checks without network requests")]
         dry_run: bool,
     },
 }

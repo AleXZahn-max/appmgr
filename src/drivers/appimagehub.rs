@@ -1,8 +1,11 @@
+use crate::drivers::{read_index_metadata, write_index_metadata};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppImageHubPackage {
@@ -16,6 +19,27 @@ pub struct AppImageHubPackage {
     pub github_repo: Option<String>,
     #[serde(default)]
     pub download_url: Option<String>,
+}
+
+type HubStamp = Option<(SystemTime, u64)>;
+type HubIndexCacheMap = HashMap<PathBuf, (HubStamp, Arc<HashMap<String, AppImageHubPackage>>)>;
+
+static HUB_INDEX_CACHE: OnceLock<RwLock<HubIndexCacheMap>> = OnceLock::new();
+
+fn hub_cache() -> &'static RwLock<HubIndexCacheMap> {
+    HUB_INDEX_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn file_stamp(path: &Path) -> HubStamp {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    Some((mtime, meta.len()))
+}
+
+pub fn invalidate_appimagehub_cache(index_file: &Path) {
+    if let Ok(mut guard) = hub_cache().write() {
+        guard.remove(index_file);
+    }
 }
 
 pub fn sanitize_app_id(name: &str) -> String {
@@ -175,6 +199,8 @@ pub async fn sync_appimagehub_repo(
     let _ = fs::create_dir_all(cache_dir);
     fs::write(&index_file, json_bytes)
         .map_err(|e| format!("Failed to write AppImageHub index: {}", e))?;
+    write_index_metadata(&index_file, count);
+    invalidate_appimagehub_cache(&index_file);
 
     if let Some(tag) = new_etag {
         let _ = fs::write(&etag_file, tag);
@@ -183,22 +209,47 @@ pub async fn sync_appimagehub_repo(
     Ok((true, count, downloaded_bytes))
 }
 
-fn load_cached_appimagehub_count(index_file: &Path) -> usize {
-    if let Ok(bytes) = fs::read(index_file) {
-        if let Ok(pkgs) = serde_json::from_slice::<HashMap<String, AppImageHubPackage>>(&bytes) {
-            return pkgs.len();
-        }
+pub fn load_cached_appimagehub_count(index_file: &Path) -> usize {
+    if let Some(meta) = read_index_metadata(index_file) {
+        return meta.package_count;
     }
-    0
+    let pkgs = get_cached_appimagehub_packages(index_file);
+    let count = pkgs.len();
+    if index_file.exists() {
+        write_index_metadata(index_file, count);
+    }
+    count
 }
 
-pub fn load_cached_appimagehub_packages(index_file: &Path) -> HashMap<String, AppImageHubPackage> {
-    if let Ok(bytes) = fs::read(index_file) {
-        if let Ok(pkgs) = serde_json::from_slice::<HashMap<String, AppImageHubPackage>>(&bytes) {
-            return pkgs;
+pub fn get_cached_appimagehub_packages(
+    index_file: &Path,
+) -> Arc<HashMap<String, AppImageHubPackage>> {
+    let stamp = file_stamp(index_file);
+    if let Ok(guard) = hub_cache().read() {
+        if let Some((cached_stamp, arc)) = guard.get(index_file) {
+            if *cached_stamp == stamp && stamp.is_some() {
+                return Arc::clone(arc);
+            }
         }
     }
-    HashMap::new()
+
+    let parsed = if let Ok(bytes) = fs::read(index_file) {
+        serde_json::from_slice::<HashMap<String, AppImageHubPackage>>(&bytes).unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+    let arc = Arc::new(parsed);
+    if stamp.is_some() {
+        if let Ok(mut guard) = hub_cache().write() {
+            guard.insert(index_file.to_path_buf(), (stamp, Arc::clone(&arc)));
+        }
+    }
+    arc
+}
+
+#[allow(dead_code)]
+pub fn load_cached_appimagehub_packages(index_file: &Path) -> HashMap<String, AppImageHubPackage> {
+    (*get_cached_appimagehub_packages(index_file)).clone()
 }
 
 #[cfg(test)]

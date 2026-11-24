@@ -80,134 +80,6 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
-(repo)
-_arguments "${_arguments_options[@]}" : \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-":: :_appmgr__subcmd__repo_commands" \
-"*::: :->repo" \
-&& ret=0
-
-    case $state in
-    (repo)
-        words=($line[1] "${words[@]}")
-        (( CURRENT += 1 ))
-        curcontext="${curcontext%:*:*}:appmgr-repo-command-$line[1]:"
-        case $line[1] in
-            (list)
-_arguments "${_arguments_options[@]}" : \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'--json[Output machine-readable JSON]' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-&& ret=0
-;;
-(add)
-_arguments "${_arguments_options[@]}" : \
-'--suite=[Debian suite / distribution branch (for apt)]:SUITE:_default' \
-'--components=[Debian components (for apt)]:COMPONENTS:_default' \
-'--priority=[Priority ranking (0..1000)]:PRIORITY:_default' \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-':driver -- Driver or registry type (apt, appimagehub, aur, github, registry):_default' \
-':id -- Repository identifier (e.g. core, my-apt):_default' \
-':url -- Repository URL or index endpoint:_default' \
-&& ret=0
-;;
-(remove)
-_arguments "${_arguments_options[@]}" : \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-':id -- Repository identifier to remove:_default' \
-&& ret=0
-;;
-(enable)
-_arguments "${_arguments_options[@]}" : \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-':id -- Repository identifier to enable:_default' \
-&& ret=0
-;;
-(disable)
-_arguments "${_arguments_options[@]}" : \
-'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'-y[Automatic yes to prompts]' \
-'--yes[Automatic yes to prompts]' \
-'--system[Force system-wide installation mode (/opt, /usr/local)]' \
-'--user[Force user-level rootless mode (~/.local)]' \
-'-h[Print help]' \
-'--help[Print help]' \
-':id -- Repository identifier to disable:_default' \
-&& ret=0
-;;
-(help)
-_arguments "${_arguments_options[@]}" : \
-":: :_appmgr__subcmd__repo__subcmd__help_commands" \
-"*::: :->help" \
-&& ret=0
-
-    case $state in
-    (help)
-        words=($line[1] "${words[@]}")
-        (( CURRENT += 1 ))
-        curcontext="${curcontext%:*:*}:appmgr-repo-help-command-$line[1]:"
-        case $line[1] in
-            (list)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-(add)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-(remove)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-(enable)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-(disable)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-(help)
-_arguments "${_arguments_options[@]}" : \
-&& ret=0
-;;
-        esac
-    ;;
-esac
-;;
-        esac
-    ;;
-esac
-;;
 (source)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
@@ -227,7 +99,86 @@ _arguments "${_arguments_options[@]}" : \
         (( CURRENT += 1 ))
         curcontext="${curcontext%:*:*}:appmgr-source-command-$line[1]:"
         case $line[1] in
-            (lint)
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'--json[Output machine-readable JSON]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(add)
+_arguments "${_arguments_options[@]}" : \
+'--suite=[Debian suite / distribution branch (for apt)]:SUITE:_default' \
+'--components=[Debian components (comma or space separated)]:COMPONENTS:_default' \
+'--priority=[Priority ranking (0..1000)]:PRIORITY:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':driver -- Driver or registry type (apt, appimagehub, aur, github, registry):_default' \
+':id -- Source identifier (e.g. core, my-apt):_default' \
+':url -- Source URL or index endpoint:_default' \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Source identifier to remove:_default' \
+&& ret=0
+;;
+(enable)
+_arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Source identifier to enable:_default' \
+&& ret=0
+;;
+(disable)
+_arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Source identifier to disable:_default' \
+&& ret=0
+;;
+(new)
+_arguments "${_arguments_options[@]}" : \
+'-o+[Destination TOML file path]:OUTPUT:_default' \
+'--output=[Destination TOML file path]:OUTPUT:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Source ID for the new recipe:_default' \
+&& ret=0
+;;
+(lint)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
@@ -242,6 +193,7 @@ _arguments "${_arguments_options[@]}" : \
 (test)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'--dry-run[Validate recipe and print endpoints without network checks]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -263,7 +215,31 @@ _arguments "${_arguments_options[@]}" : \
         (( CURRENT += 1 ))
         curcontext="${curcontext%:*:*}:appmgr-source-help-command-$line[1]:"
         case $line[1] in
-            (lint)
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(add)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(enable)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(disable)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(new)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(lint)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -348,7 +324,7 @@ _arguments "${_arguments_options[@]}" : \
 (test)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
-'--dry-run[Emulate checks without modifying system]' \
+'--dry-run[Emulate checks without network requests]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -652,17 +628,17 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
-(repo)
+(source)
 _arguments "${_arguments_options[@]}" : \
-":: :_appmgr__subcmd__help__subcmd__repo_commands" \
-"*::: :->repo" \
+":: :_appmgr__subcmd__help__subcmd__source_commands" \
+"*::: :->source" \
 && ret=0
 
     case $state in
-    (repo)
+    (source)
         words=($line[1] "${words[@]}")
         (( CURRENT += 1 ))
-        curcontext="${curcontext%:*:*}:appmgr-help-repo-command-$line[1]:"
+        curcontext="${curcontext%:*:*}:appmgr-help-source-command-$line[1]:"
         case $line[1] in
             (list)
 _arguments "${_arguments_options[@]}" : \
@@ -684,23 +660,11 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
-        esac
-    ;;
-esac
-;;
-(source)
+(new)
 _arguments "${_arguments_options[@]}" : \
-":: :_appmgr__subcmd__help__subcmd__source_commands" \
-"*::: :->source" \
 && ret=0
-
-    case $state in
-    (source)
-        words=($line[1] "${words[@]}")
-        (( CURRENT += 1 ))
-        curcontext="${curcontext%:*:*}:appmgr-help-source-command-$line[1]:"
-        case $line[1] in
-            (lint)
+;;
+(lint)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -835,12 +799,11 @@ _appmgr_commands() {
 'install:Install application locally, from GitHub (owner/repo\[@tag\]), or search' \
 'search:Search package sources and online registries for applications' \
 'update:Synchronize package databases from configured sources' \
-'repo:Manage software sources and repositories in sources.list' \
-'source:Validate and test source definitions (Schema v2)' \
+'source:Manage, validate, and test package sources and recipes (Schema v2)' \
 'deps:Diagnose and repair shared library dependencies for installed applications' \
 'pkg:Maintainer tools for recipe creation, linting, and testing' \
 'link:Link an installed application to a GitHub repository for updates' \
-'upgrade:Check and upgrade packages from GitHub Releases and registries' \
+'upgrade:Check and upgrade packages from GitHub Releases, APT, and AppImageHub' \
 'remove:Remove an installed application' \
 'list:List installed applications' \
 'info:Display details about a package or file' \
@@ -902,12 +865,11 @@ _appmgr__subcmd__help_commands() {
 'install:Install application locally, from GitHub (owner/repo\[@tag\]), or search' \
 'search:Search package sources and online registries for applications' \
 'update:Synchronize package databases from configured sources' \
-'repo:Manage software sources and repositories in sources.list' \
-'source:Validate and test source definitions (Schema v2)' \
+'source:Manage, validate, and test package sources and recipes (Schema v2)' \
 'deps:Diagnose and repair shared library dependencies for installed applications' \
 'pkg:Maintainer tools for recipe creation, linting, and testing' \
 'link:Link an installed application to a GitHub repository for updates' \
-'upgrade:Check and upgrade packages from GitHub Releases and registries' \
+'upgrade:Check and upgrade packages from GitHub Releases, APT, and AppImageHub' \
 'remove:Remove an installed application' \
 'list:List installed applications' \
 'info:Display details about a package or file' \
@@ -1027,42 +989,6 @@ _appmgr__subcmd__help__subcmd__remove_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr help remove commands' commands "$@"
 }
-(( $+functions[_appmgr__subcmd__help__subcmd__repo_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo_commands() {
-    local commands; commands=(
-'list:List configured repositories in sources.list' \
-'add:Add a repository to sources.list' \
-'remove:Remove a repository from sources.list and delete its cache' \
-'enable:Enable a previously disabled repository' \
-'disable:Disable a repository without deleting its configuration' \
-    )
-    _describe -t commands 'appmgr help repo commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__help__subcmd__repo__subcmd__add_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo__subcmd__add_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr help repo add commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__help__subcmd__repo__subcmd__disable_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo__subcmd__disable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr help repo disable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__help__subcmd__repo__subcmd__enable_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo__subcmd__enable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr help repo enable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__help__subcmd__repo__subcmd__list_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo__subcmd__list_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr help repo list commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__help__subcmd__repo__subcmd__remove_commands] )) ||
-_appmgr__subcmd__help__subcmd__repo__subcmd__remove_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr help repo remove commands' commands "$@"
-}
 (( $+functions[_appmgr__subcmd__help__subcmd__rollback_commands] )) ||
 _appmgr__subcmd__help__subcmd__rollback_commands() {
     local commands; commands=()
@@ -1086,15 +1012,51 @@ _appmgr__subcmd__help__subcmd__self-update_commands() {
 (( $+functions[_appmgr__subcmd__help__subcmd__source_commands] )) ||
 _appmgr__subcmd__help__subcmd__source_commands() {
     local commands; commands=(
+'list:List configured sources in sources.list' \
+'add:Add a source to sources.list' \
+'remove:Remove a source from sources.list and delete its cache' \
+'enable:Enable a previously disabled source' \
+'disable:Disable a source without deleting its configuration' \
+'new:Generate a new Schema v2 source recipe template' \
 'lint:Lint and validate a source definition TOML against Schema v2' \
 'test:Test source endpoint reachability and index access' \
     )
     _describe -t commands 'appmgr help source commands' commands "$@"
 }
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__add_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source add commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__disable_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__disable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source disable commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__enable_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__enable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source enable commands' commands "$@"
+}
 (( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__lint_commands] )) ||
 _appmgr__subcmd__help__subcmd__source__subcmd__lint_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr help source lint commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__list_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source list commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__new_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__new_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source new commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__remove_commands] )) ||
+_appmgr__subcmd__help__subcmd__source__subcmd__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help source remove commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__help__subcmd__source__subcmd__test_commands] )) ||
 _appmgr__subcmd__help__subcmd__source__subcmd__test_commands() {
@@ -1211,85 +1173,6 @@ _appmgr__subcmd__remove_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr remove commands' commands "$@"
 }
-(( $+functions[_appmgr__subcmd__repo_commands] )) ||
-_appmgr__subcmd__repo_commands() {
-    local commands; commands=(
-'list:List configured repositories in sources.list' \
-'add:Add a repository to sources.list' \
-'remove:Remove a repository from sources.list and delete its cache' \
-'enable:Enable a previously disabled repository' \
-'disable:Disable a repository without deleting its configuration' \
-'help:Print this message or the help of the given subcommand(s)' \
-    )
-    _describe -t commands 'appmgr repo commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__add_commands] )) ||
-_appmgr__subcmd__repo__subcmd__add_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo add commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__disable_commands] )) ||
-_appmgr__subcmd__repo__subcmd__disable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo disable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__enable_commands] )) ||
-_appmgr__subcmd__repo__subcmd__enable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo enable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help_commands() {
-    local commands; commands=(
-'list:List configured repositories in sources.list' \
-'add:Add a repository to sources.list' \
-'remove:Remove a repository from sources.list and delete its cache' \
-'enable:Enable a previously disabled repository' \
-'disable:Disable a repository without deleting its configuration' \
-'help:Print this message or the help of the given subcommand(s)' \
-    )
-    _describe -t commands 'appmgr repo help commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__add_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__add_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help add commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__disable_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__disable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help disable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__enable_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__enable_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help enable commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__help_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__help_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help help commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__list_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__list_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help list commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__help__subcmd__remove_commands] )) ||
-_appmgr__subcmd__repo__subcmd__help__subcmd__remove_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo help remove commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__list_commands] )) ||
-_appmgr__subcmd__repo__subcmd__list_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo list commands' commands "$@"
-}
-(( $+functions[_appmgr__subcmd__repo__subcmd__remove_commands] )) ||
-_appmgr__subcmd__repo__subcmd__remove_commands() {
-    local commands; commands=()
-    _describe -t commands 'appmgr repo remove commands' commands "$@"
-}
 (( $+functions[_appmgr__subcmd__rollback_commands] )) ||
 _appmgr__subcmd__rollback_commands() {
     local commands; commands=()
@@ -1313,20 +1196,62 @@ _appmgr__subcmd__self-update_commands() {
 (( $+functions[_appmgr__subcmd__source_commands] )) ||
 _appmgr__subcmd__source_commands() {
     local commands; commands=(
+'list:List configured sources in sources.list' \
+'add:Add a source to sources.list' \
+'remove:Remove a source from sources.list and delete its cache' \
+'enable:Enable a previously disabled source' \
+'disable:Disable a source without deleting its configuration' \
+'new:Generate a new Schema v2 source recipe template' \
 'lint:Lint and validate a source definition TOML against Schema v2' \
 'test:Test source endpoint reachability and index access' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'appmgr source commands' commands "$@"
 }
+(( $+functions[_appmgr__subcmd__source__subcmd__add_commands] )) ||
+_appmgr__subcmd__source__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source add commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__disable_commands] )) ||
+_appmgr__subcmd__source__subcmd__disable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source disable commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__enable_commands] )) ||
+_appmgr__subcmd__source__subcmd__enable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source enable commands' commands "$@"
+}
 (( $+functions[_appmgr__subcmd__source__subcmd__help_commands] )) ||
 _appmgr__subcmd__source__subcmd__help_commands() {
     local commands; commands=(
+'list:List configured sources in sources.list' \
+'add:Add a source to sources.list' \
+'remove:Remove a source from sources.list and delete its cache' \
+'enable:Enable a previously disabled source' \
+'disable:Disable a source without deleting its configuration' \
+'new:Generate a new Schema v2 source recipe template' \
 'lint:Lint and validate a source definition TOML against Schema v2' \
 'test:Test source endpoint reachability and index access' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'appmgr source help commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__add_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help add commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__disable_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__disable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help disable commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__enable_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__enable_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help enable commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__help_commands] )) ||
 _appmgr__subcmd__source__subcmd__help__subcmd__help_commands() {
@@ -1338,6 +1263,21 @@ _appmgr__subcmd__source__subcmd__help__subcmd__lint_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr source help lint commands' commands "$@"
 }
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__list_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help list commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__new_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__new_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help new commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__remove_commands] )) ||
+_appmgr__subcmd__source__subcmd__help__subcmd__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source help remove commands' commands "$@"
+}
 (( $+functions[_appmgr__subcmd__source__subcmd__help__subcmd__test_commands] )) ||
 _appmgr__subcmd__source__subcmd__help__subcmd__test_commands() {
     local commands; commands=()
@@ -1347,6 +1287,21 @@ _appmgr__subcmd__source__subcmd__help__subcmd__test_commands() {
 _appmgr__subcmd__source__subcmd__lint_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr source lint commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__list_commands] )) ||
+_appmgr__subcmd__source__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source list commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__new_commands] )) ||
+_appmgr__subcmd__source__subcmd__new_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source new commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__source__subcmd__remove_commands] )) ||
+_appmgr__subcmd__source__subcmd__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr source remove commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__source__subcmd__test_commands] )) ||
 _appmgr__subcmd__source__subcmd__test_commands() {

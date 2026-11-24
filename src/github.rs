@@ -63,12 +63,57 @@ impl GitHubClient {
     pub const API_BASE: &'static str = "https://api.github.com";
 
     pub fn new() -> Self {
-        let token = std::env::var("GITHUB_TOKEN").ok().filter(|s| !s.is_empty());
+        let token = std::env::var("GITHUB_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("GH_TOKEN").ok().filter(|s| !s.is_empty()));
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { token, client }
+    }
+
+    pub fn format_rate_limit_message(headers: &HeaderMap, status: StatusCode) -> String {
+        let remaining = headers
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("?");
+        let reset_info = headers
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok())
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .map(|dt| {
+                let local_str = dt.with_timezone(&chrono::Local).format("%H:%M:%S");
+                let now_ts = chrono::Utc::now().timestamp();
+                let diff = (dt.timestamp() - now_ts).max(0);
+                format!(", resets at {} (in {}s)", local_str, diff)
+            })
+            .unwrap_or_default();
+
+        format!(
+            "GitHub API rate limit exceeded (HTTP {}, X-RateLimit-Remaining: {}{}). Set GITHUB_TOKEN environment variable to raise limit to 5,000 req/hr.",
+            status, remaining, reset_info
+        )
+    }
+
+    fn check_error_response(headers: &HeaderMap, status: StatusCode) -> Option<String> {
+        if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+            let remaining = headers
+                .get("x-ratelimit-remaining")
+                .and_then(|v| v.to_str().ok());
+            if remaining == Some("0")
+                || status == StatusCode::TOO_MANY_REQUESTS
+                || status == StatusCode::FORBIDDEN
+            {
+                return Some(Self::format_rate_limit_message(headers, status));
+            }
+        }
+        if !status.is_success() {
+            return Some(format!("GitHub API error (HTTP {})", status));
+        }
+        None
     }
 
     fn headers(&self, etag: Option<&str>) -> HeaderMap {
@@ -116,11 +161,8 @@ impl GitHubClient {
             .map_err(|e| format!("Network error: {}", e))?;
 
         let status = resp.status();
-        if status == StatusCode::FORBIDDEN {
-            return Err("GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable to get 5,000 req/hr.".to_string());
-        }
-        if !status.is_success() {
-            return Err(format!("GitHub Search API error (HTTP {})", status));
+        if let Some(err) = Self::check_error_response(resp.headers(), status) {
+            return Err(err);
         }
 
         #[derive(Deserialize)]
@@ -172,11 +214,8 @@ impl GitHubClient {
             if status == StatusCode::NOT_FOUND {
                 return Ok((StatusCode::NOT_FOUND, None, None, false));
             }
-            if status == StatusCode::FORBIDDEN {
-                return Err(
-                    "GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable."
-                        .to_string(),
-                );
+            if let Some(err) = Self::check_error_response(resp.headers(), status) {
+                return Err(err);
             }
 
             let new_etag = resp
@@ -218,6 +257,9 @@ impl GitHubClient {
             if status == StatusCode::NOT_FOUND {
                 return Ok((StatusCode::NOT_FOUND, None, None, false));
             }
+            if let Some(err) = Self::check_error_response(resp.headers(), status) {
+                return Err(err);
+            }
 
             let new_etag = resp
                 .headers()
@@ -256,32 +298,34 @@ impl GitHubClient {
             ));
         }
         if status == StatusCode::NOT_FOUND {
-            // Fallback: check if repo has only pre-releases
             let fb_url = format!(
                 "{}/repos/{}/releases?per_page=5",
                 Self::API_BASE,
                 clean_repo
             );
-            if let Ok(fb_resp) = self
+            let fb_resp = self
                 .client
                 .get(&fb_url)
                 .headers(self.headers(None))
                 .send()
                 .await
-            {
-                if let Ok(fb_list) = fb_resp.json::<Vec<Release>>().await {
-                    if let Some(first) = fb_list.into_iter().next() {
-                        return Ok((StatusCode::OK, Some(first), None, true));
-                    }
+                .map_err(|e| format!("Network error: {}", e))?;
+            let fb_status = fb_resp.status();
+            if fb_status == StatusCode::NOT_FOUND {
+                return Ok((StatusCode::NOT_FOUND, None, None, false));
+            }
+            if let Some(err) = Self::check_error_response(fb_resp.headers(), fb_status) {
+                return Err(err);
+            }
+            if let Ok(fb_list) = fb_resp.json::<Vec<Release>>().await {
+                if let Some(first) = fb_list.into_iter().next() {
+                    return Ok((StatusCode::OK, Some(first), None, true));
                 }
             }
             return Ok((StatusCode::NOT_FOUND, None, None, false));
         }
-        if status == StatusCode::FORBIDDEN {
-            return Err(
-                "GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable."
-                    .to_string(),
-            );
+        if let Some(err) = Self::check_error_response(resp.headers(), status) {
+            return Err(err);
         }
 
         let new_etag = resp
@@ -570,7 +614,6 @@ impl GitHubClient {
                     }
                 }
                 _ => {
-                    // Default priority: .AppImage -> .deb -> .tar.* -> .zip -> raw binary
                     if is_appimage {
                         30
                     } else if is_deb {
@@ -983,13 +1026,22 @@ mod tests {
             },
         ];
 
-        // Default: AppImage > deb > tar
         let filtered = client.filter_assets(&assets, None, None, None);
         assert!(!filtered.is_empty());
         assert_eq!(filtered[0].format, "appimage");
 
-        // Prefer deb: deb > AppImage
         let prefer_deb = client.filter_assets(&assets, Some("deb"), None, None);
         assert_eq!(prefer_deb[0].format, "deb");
+    }
+
+    #[test]
+    fn test_rate_limit_formatting_and_403_check() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+        headers.insert("x-ratelimit-reset", HeaderValue::from_static("1800000000"));
+        let msg = GitHubClient::check_error_response(&headers, StatusCode::FORBIDDEN).unwrap();
+        assert!(msg.contains("X-RateLimit-Remaining: 0"));
+        assert!(msg.contains("resets at"));
+        assert!(msg.contains("GITHUB_TOKEN"));
     }
 }

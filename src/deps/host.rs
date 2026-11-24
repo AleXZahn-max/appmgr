@@ -1,6 +1,6 @@
 use crate::deps::analyzer::{ElfClass, MissingLib};
 use crate::ui::{apt_prefix, c, confirm_dialog, print_table, Colors};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -24,34 +24,38 @@ impl HostPackageManagerKind {
     }
 
     pub fn build_install_command(&self, packages: &[String]) -> Vec<String> {
+        self.build_install_command_for(packages, crate::config::is_root())
+    }
+
+    pub fn build_install_command_for(
+        &self,
+        packages: &[String],
+        running_as_root: bool,
+    ) -> Vec<String> {
         let mut cmd = Vec::new();
+        if !running_as_root {
+            cmd.push("sudo".to_string());
+        }
         match self {
             Self::Pacman => {
-                cmd.push("sudo".to_string());
                 cmd.push("pacman".to_string());
                 cmd.push("-S".to_string());
                 cmd.push("--needed".to_string());
-                cmd.extend(packages.iter().cloned());
             }
             Self::Dnf => {
-                cmd.push("sudo".to_string());
                 cmd.push("dnf".to_string());
                 cmd.push("install".to_string());
-                cmd.extend(packages.iter().cloned());
             }
             Self::Apt => {
-                cmd.push("sudo".to_string());
                 cmd.push("apt-get".to_string());
                 cmd.push("install".to_string());
-                cmd.extend(packages.iter().cloned());
             }
             Self::Zypper => {
-                cmd.push("sudo".to_string());
                 cmd.push("zypper".to_string());
                 cmd.push("install".to_string());
-                cmd.extend(packages.iter().cloned());
             }
         }
+        cmd.extend(packages.iter().cloned());
         cmd
     }
 }
@@ -83,11 +87,13 @@ pub fn check_pacman_files_db_exists() -> bool {
     false
 }
 
-/// Parses raw pacman --machinereadable output:
-/// format: repository\0pkgname\0pkgver\0path\n
-pub fn parse_pacman_machinereadable(raw_output: &[u8], elf_class: ElfClass) -> Option<String> {
+/// Parses batched `pacman -F --machinereadable` output for multiple SONAMEs.
+pub fn parse_pacman_machinereadable_batch(
+    raw_output: &[u8],
+    targets: &[MissingLib],
+) -> HashMap<String, String> {
     let text = String::from_utf8_lossy(raw_output);
-    let mut candidates = Vec::new();
+    let mut grouped: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
 
     for line in text.split('\n') {
         let trimmed = line.trim();
@@ -99,8 +105,47 @@ pub fn parse_pacman_machinereadable(raw_output: &[u8], elf_class: ElfClass) -> O
             let repo = parts[0];
             let pkg = parts[1];
             let path = parts[3];
+            for target in targets {
+                if path == target.soname || path.ends_with(&format!("/{}", target.soname)) {
+                    grouped.entry(target.soname.clone()).or_default().push((
+                        repo.to_string(),
+                        pkg.to_string(),
+                        path.to_string(),
+                    ));
+                }
+            }
+        }
+    }
 
-            candidates.push((repo.to_string(), pkg.to_string(), path.to_string()));
+    let mut result = HashMap::new();
+    for target in targets {
+        if let Some(cands) = grouped.get(&target.soname) {
+            if let Some(pkg) = select_pacman_candidate(cands, target.elf_class) {
+                result.insert(target.soname.clone(), pkg);
+            }
+        }
+    }
+    result
+}
+
+/// Parses raw pacman --machinereadable output for a single SONAME.
+#[allow(dead_code)]
+pub fn parse_pacman_machinereadable(raw_output: &[u8], elf_class: ElfClass) -> Option<String> {
+    let text = String::from_utf8_lossy(raw_output);
+    let mut candidates = Vec::new();
+
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split('\0').collect();
+        if parts.len() >= 4 {
+            candidates.push((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                parts[3].to_string(),
+            ));
         }
     }
 
@@ -118,7 +163,6 @@ pub fn select_pacman_candidate(
 
     match elf_class {
         ElfClass::Elf64 => {
-            // Priority 1: usr/lib/ or lib/ (NOT usr/lib32), repo is not multilib, name does not start with lib32-
             for (repo, pkg, path) in candidates {
                 if !path.starts_with("usr/lib32")
                     && !repo.eq_ignore_ascii_case("multilib")
@@ -127,7 +171,6 @@ pub fn select_pacman_candidate(
                     return Some(pkg.clone());
                 }
             }
-            // Fallback: any candidate that does not start with lib32-
             for (_, pkg, _) in candidates {
                 if !pkg.starts_with("lib32-") {
                     return Some(pkg.clone());
@@ -135,7 +178,6 @@ pub fn select_pacman_candidate(
             }
         }
         ElfClass::Elf32 => {
-            // Priority 1: path is under usr/lib32, or package starts with lib32-
             for (_, pkg, path) in candidates {
                 if path.starts_with("usr/lib32") || pkg.starts_with("lib32-") {
                     return Some(pkg.clone());
@@ -147,191 +189,276 @@ pub fn select_pacman_candidate(
     candidates.first().map(|(_, p, _)| p.clone())
 }
 
-/// Queries the host package manager for a missing library.
-pub fn query_host_for_library(
-    pm: HostPackageManagerKind,
-    missing: &MissingLib,
-) -> Result<Option<String>, String> {
-    match pm {
-        HostPackageManagerKind::Pacman => {
-            if !check_pacman_files_db_exists() {
-                return Err(
-                    "Pacman files database is not synchronized (/var/lib/pacman/sync/*.files missing). Please run 'sudo pacman -Fy' to synchronize file records.".to_string()
-                );
-            }
-
-            // Try machinereadable first
-            let output = Command::new("pacman")
-                .args(["-F", "--machinereadable", &missing.soname])
-                .output()
-                .map_err(|e| format!("Failed to execute pacman: {}", e))?;
-
-            if output.status.success() && !output.stdout.is_empty() {
-                if let Some(pkg) = parse_pacman_machinereadable(&output.stdout, missing.elf_class) {
-                    return Ok(Some(pkg));
-                }
-            }
-
-            // Fallback: query pacman -F
-            let human_out = Command::new("pacman")
-                .args(["-F", &missing.soname])
-                .output()
-                .map_err(|e| format!("Failed to execute pacman -F: {}", e))?;
-
-            if human_out.status.success() {
-                let text = String::from_utf8_lossy(&human_out.stdout);
-                let mut candidates = Vec::new();
-                let mut current_pkg = None;
-
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if !line.starts_with(' ') && !line.starts_with('\t') {
-                        // Header line: repo/pkgname version
-                        if let Some((repo_pkg, _)) = trimmed.split_once(' ') {
-                            if let Some((repo, pkg)) = repo_pkg.split_once('/') {
-                                current_pkg = Some((repo.to_string(), pkg.to_string()));
-                            }
-                        }
-                    } else if let Some((ref r, ref p)) = current_pkg {
-                        candidates.push((r.clone(), p.clone(), trimmed.to_string()));
-                    }
-                }
-
-                if let Some(pkg) = select_pacman_candidate(&candidates, missing.elf_class) {
-                    return Ok(Some(pkg));
-                }
-            }
-
-            Ok(None)
+pub fn parse_apt_file_batch_output(text: &str, targets: &[MissingLib]) -> HashMap<String, String> {
+    let mut resolved = HashMap::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
         }
-        HostPackageManagerKind::Dnf => {
-            let output = Command::new("dnf")
-                .args(["provides", "--quiet", &format!("*/{}", missing.soname)])
-                .output()
-                .map_err(|e| format!("Failed to execute dnf: {}", e))?;
-
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    // Sample line: "libfoo-1.0-1.fc38.x86_64 : Library description"
-                    let pkg_part = trimmed.split(':').next().unwrap_or("").trim();
-                    if let Some((name_ver, arch)) = pkg_part.rsplit_once('.') {
-                        let is_match = match missing.elf_class {
-                            ElfClass::Elf64 => {
-                                arch == "x86_64" || arch == "aarch64" || arch == "noarch"
-                            }
-                            ElfClass::Elf32 => arch == "i686" || arch == "i386",
-                        };
-                        if is_match {
-                            if let Some((name, _)) = name_ver.rsplit_once('-') {
-                                return Ok(Some(name.to_string()));
-                            }
-                            return Ok(Some(name_ver.to_string()));
+        if let Some((pkg, path)) = trimmed.split_once(':') {
+            let path_trim = path.trim();
+            for target in targets {
+                if resolved.contains_key(&target.soname) {
+                    continue;
+                }
+                if path_trim == target.soname || path_trim.ends_with(&format!("/{}", target.soname))
+                {
+                    let is_match = match target.elf_class {
+                        ElfClass::Elf64 => !path_trim.contains("i386-linux-gnu"),
+                        ElfClass::Elf32 => {
+                            path_trim.contains("i386-linux-gnu") || path_trim.contains("lib32")
                         }
+                    };
+                    if is_match {
+                        resolved.insert(target.soname.clone(), pkg.trim().to_string());
                     }
                 }
             }
-
-            Ok(None)
-        }
-        HostPackageManagerKind::Apt => {
-            if which::which("apt-file").is_err() {
-                return Err(
-                    "Command 'apt-file' is not installed. Run 'sudo apt-get install -y apt-file && sudo apt-file update' to enable native package lookup.".to_string()
-                );
-            }
-
-            let output = Command::new("apt-file")
-                .args(["search", &format!("/{}", missing.soname)])
-                .output()
-                .map_err(|e| format!("Failed to execute apt-file: {}", e))?;
-
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if let Some((pkg, path)) = trimmed.split_once(':') {
-                        let path_trim = path.trim();
-                        let is_match = match missing.elf_class {
-                            ElfClass::Elf64 => !path_trim.contains("i386-linux-gnu"),
-                            ElfClass::Elf32 => {
-                                path_trim.contains("i386-linux-gnu") || path_trim.contains("lib32")
-                            }
-                        };
-                        if is_match {
-                            return Ok(Some(pkg.trim().to_string()));
-                        }
-                    }
-                }
-            }
-
-            Ok(None)
-        }
-        HostPackageManagerKind::Zypper => {
-            let output = Command::new("zypper")
-                .args(["--no-refresh", "se", "--provides", &missing.soname])
-                .output()
-                .map_err(|e| format!("Failed to execute zypper: {}", e))?;
-
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with('|') || trimmed.starts_with("---") || trimmed.is_empty()
-                    {
-                        continue;
-                    }
-                    let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
-                    if parts.len() >= 2 && !parts[1].eq_ignore_ascii_case("name") {
-                        return Ok(Some(parts[1].to_string()));
-                    }
-                }
-            }
-
-            Ok(None)
         }
     }
+    resolved
+}
+
+fn parse_pacman_human_batch(text: &str, targets: &[MissingLib]) -> HashMap<String, String> {
+    let mut grouped: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
+    let mut current_pkg = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if let Some((repo_pkg, _)) = trimmed.split_once(' ') {
+                if let Some((repo, pkg)) = repo_pkg.split_once('/') {
+                    current_pkg = Some((repo.to_string(), pkg.to_string()));
+                }
+            }
+        } else if let Some((ref r, ref p)) = current_pkg {
+            for target in targets {
+                if trimmed == target.soname || trimmed.ends_with(&format!("/{}", target.soname)) {
+                    grouped.entry(target.soname.clone()).or_default().push((
+                        r.clone(),
+                        p.clone(),
+                        trimmed.to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut result = HashMap::new();
+    for target in targets {
+        if let Some(cands) = grouped.get(&target.soname) {
+            if let Some(pkg) = select_pacman_candidate(cands, target.elf_class) {
+                result.insert(target.soname.clone(), pkg);
+            }
+        }
+    }
+    result
+}
+
+fn parse_dnf_pkg_name_for_class(pkg_part: &str, elf_class: ElfClass) -> Option<String> {
+    if let Some((name_ver, arch)) = pkg_part.rsplit_once('.') {
+        let is_match = match elf_class {
+            ElfClass::Elf64 => arch == "x86_64" || arch == "aarch64" || arch == "noarch",
+            ElfClass::Elf32 => arch == "i686" || arch == "i386",
+        };
+        if is_match {
+            if let Some((name, _)) = name_ver.rsplit_once('-') {
+                return Some(name.to_string());
+            }
+            return Some(name_ver.to_string());
+        }
+    }
+    None
+}
+
+pub fn parse_dnf_provides_batch(text: &str, targets: &[MissingLib]) -> HashMap<String, String> {
+    let mut resolved = HashMap::new();
+    let mut current_pkg_part: Option<String> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            current_pkg_part = None;
+            continue;
+        }
+        if !line.starts_with(' ') && line.contains(" : ") {
+            current_pkg_part = trimmed.split(':').next().map(|s| s.trim().to_string());
+        } else if let Some(ref pkg_part) = current_pkg_part {
+            if trimmed.starts_with("Filename") || trimmed.starts_with("Provide") {
+                for target in targets {
+                    if resolved.contains_key(&target.soname) {
+                        continue;
+                    }
+                    if trimmed.contains(&target.soname) {
+                        if let Some(name) = parse_dnf_pkg_name_for_class(pkg_part, target.elf_class)
+                        {
+                            resolved.insert(target.soname.clone(), name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    resolved
+}
+
+fn query_zypper_single(missing: &MissingLib) -> Result<Option<String>, String> {
+    let output = Command::new("zypper")
+        .args(["--no-refresh", "se", "--provides", &missing.soname])
+        .output()
+        .map_err(|e| format!("Failed to execute zypper: {}", e))?;
+
+    if output.status.success() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('|') || trimmed.starts_with("---") || trimmed.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
+            if parts.len() >= 2 && !parts[1].eq_ignore_ascii_case("name") {
+                return Ok(Some(parts[1].to_string()));
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[allow(dead_code)]
 pub struct HostResolveResult {
-    pub resolved_packages: BTreeMap<String, Vec<String>>, // package -> list of sonames
+    pub resolved_packages: BTreeMap<String, Vec<String>>,
     pub unresolved_libs: Vec<MissingLib>,
 }
 
-/// Resolves missing libraries using the native host package manager.
+/// Resolves missing libraries using batched queries against the native host package manager.
 pub fn resolve_libraries_with_host(
     pm: HostPackageManagerKind,
     missing_libs: &[MissingLib],
 ) -> Result<HostResolveResult, String> {
     let mut resolved_packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unresolved_libs = Vec::new();
+    if missing_libs.is_empty() {
+        return Ok(HostResolveResult {
+            resolved_packages,
+            unresolved_libs,
+        });
+    }
+
+    let mut matched: HashMap<String, String> = HashMap::new();
+
+    match pm {
+        HostPackageManagerKind::Pacman => {
+            if !check_pacman_files_db_exists() {
+                println!(
+                    "{} Pacman files database is not synchronized (/var/lib/pacman/sync/*.files missing). Please run 'sudo pacman -Fy' to synchronize file records.",
+                    apt_prefix("WARN")
+                );
+                return Ok(HostResolveResult {
+                    resolved_packages,
+                    unresolved_libs: missing_libs.to_vec(),
+                });
+            }
+
+            let sonames: Vec<&str> = missing_libs.iter().map(|m| m.soname.as_str()).collect();
+            let output = Command::new("pacman")
+                .args(["-F", "--machinereadable"])
+                .args(&sonames)
+                .output()
+                .map_err(|e| format!("Failed to execute pacman: {}", e))?;
+
+            if output.status.success() && !output.stdout.is_empty() {
+                matched.extend(parse_pacman_machinereadable_batch(
+                    &output.stdout,
+                    missing_libs,
+                ));
+            }
+
+            let remaining: Vec<MissingLib> = missing_libs
+                .iter()
+                .filter(|m| !matched.contains_key(&m.soname))
+                .cloned()
+                .collect();
+            if !remaining.is_empty() {
+                let rem_args: Vec<&str> = remaining.iter().map(|m| m.soname.as_str()).collect();
+                if let Ok(human_out) = Command::new("pacman").arg("-F").args(&rem_args).output() {
+                    if human_out.status.success() {
+                        let text = String::from_utf8_lossy(&human_out.stdout);
+                        matched.extend(parse_pacman_human_batch(&text, &remaining));
+                    }
+                }
+            }
+        }
+        HostPackageManagerKind::Apt => {
+            if which::which("apt-file").is_err() {
+                println!(
+                    "{} Command 'apt-file' is not installed. Run 'sudo apt-get install -y apt-file && sudo apt-file update' to enable native package lookup.",
+                    apt_prefix("WARN")
+                );
+                return Ok(HostResolveResult {
+                    resolved_packages,
+                    unresolved_libs: missing_libs.to_vec(),
+                });
+            }
+
+            let escaped: Vec<String> = missing_libs
+                .iter()
+                .map(|m| regex::escape(&m.soname))
+                .collect();
+            let pattern = format!("/({})$", escaped.join("|"));
+            let output = Command::new("apt-file")
+                .args(["search", "-x", &pattern])
+                .output()
+                .map_err(|e| format!("Failed to execute apt-file: {}", e))?;
+
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                matched.extend(parse_apt_file_batch_output(&text, missing_libs));
+            }
+        }
+        HostPackageManagerKind::Dnf => {
+            let specs: Vec<String> = missing_libs
+                .iter()
+                .map(|m| format!("*/{}", m.soname))
+                .collect();
+            let output = Command::new("dnf")
+                .arg("provides")
+                .args(&specs)
+                .output()
+                .map_err(|e| format!("Failed to execute dnf: {}", e))?;
+
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                matched.extend(parse_dnf_provides_batch(&text, missing_libs));
+            }
+        }
+        HostPackageManagerKind::Zypper => {
+            for lib in missing_libs {
+                match query_zypper_single(lib) {
+                    Ok(Some(pkg)) => {
+                        matched.insert(lib.soname.clone(), pkg);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        println!("{} {}", apt_prefix("WARN"), e);
+                    }
+                }
+            }
+        }
+    }
 
     for lib in missing_libs {
-        match query_host_for_library(pm, lib) {
-            Ok(Some(pkg)) => {
-                resolved_packages
-                    .entry(pkg)
-                    .or_default()
-                    .push(lib.soname.clone());
-            }
-            Ok(None) => {
-                unresolved_libs.push(lib.clone());
-            }
-            Err(e) => {
-                println!("{} {}", apt_prefix("WARN"), e);
-                unresolved_libs.push(lib.clone());
-            }
+        if let Some(pkg) = matched.get(&lib.soname) {
+            resolved_packages
+                .entry(pkg.clone())
+                .or_default()
+                .push(lib.soname.clone());
+        } else {
+            unresolved_libs.push(lib.clone());
         }
     }
 
@@ -445,38 +572,59 @@ mod tests {
             ),
         ];
 
-        // 64-bit ELF must select 64-bit libayatana-indicator
         let chosen_64 = select_pacman_candidate(&candidates, ElfClass::Elf64);
         assert_eq!(chosen_64.as_deref(), Some("libayatana-indicator"));
 
-        // 32-bit ELF must select lib32-libayatana-indicator
         let chosen_32 = select_pacman_candidate(&candidates, ElfClass::Elf32);
         assert_eq!(chosen_32.as_deref(), Some("lib32-libayatana-indicator"));
     }
 
     #[test]
-    fn test_parse_pacman_machinereadable() {
-        let raw = b"extra\x00libayatana-indicator\x000.9.4-1\x00usr/lib/libayatana-indicator3.so.7\nmultilib\x00lib32-libayatana-indicator\x000.9.4-1\x00usr/lib32/libayatana-indicator3.so.7\n";
+    fn test_parse_pacman_machinereadable_and_batch() {
+        let raw = b"extra\x00libayatana-indicator\x000.9.4-1\x00usr/lib/libayatana-indicator3.so.7\nmultilib\x00lib32-libayatana-indicator\x000.9.4-1\x00usr/lib32/libayatana-indicator3.so.7\ncore\x00openssl\x003.2-1\x00usr/lib/libssl.so.3\n";
         let chosen = parse_pacman_machinereadable(raw, ElfClass::Elf64);
         assert_eq!(chosen.as_deref(), Some("libayatana-indicator"));
 
         let chosen_32 = parse_pacman_machinereadable(raw, ElfClass::Elf32);
         assert_eq!(chosen_32.as_deref(), Some("lib32-libayatana-indicator"));
+
+        let targets = vec![
+            MissingLib {
+                soname: "libayatana-indicator3.so.7".to_string(),
+                elf_class: ElfClass::Elf64,
+            },
+            MissingLib {
+                soname: "libssl.so.3".to_string(),
+                elf_class: ElfClass::Elf64,
+            },
+        ];
+        let batch = parse_pacman_machinereadable_batch(raw, &targets);
+        assert_eq!(
+            batch.get("libayatana-indicator3.so.7").map(String::as_str),
+            Some("libayatana-indicator")
+        );
+        assert_eq!(
+            batch.get("libssl.so.3").map(String::as_str),
+            Some("openssl")
+        );
     }
 
     #[test]
-    fn test_build_install_command() {
+    fn test_build_install_command_and_root_skip_sudo() {
         let pkgs = vec!["libfoo".to_string(), "libbar".to_string()];
-        let pacman_cmd = HostPackageManagerKind::Pacman.build_install_command(&pkgs);
+        let pacman_user = HostPackageManagerKind::Pacman.build_install_command_for(&pkgs, false);
         assert_eq!(
-            pacman_cmd,
+            pacman_user,
             vec!["sudo", "pacman", "-S", "--needed", "libfoo", "libbar"]
         );
 
-        let apt_cmd = HostPackageManagerKind::Apt.build_install_command(&pkgs);
+        let pacman_root = HostPackageManagerKind::Pacman.build_install_command_for(&pkgs, true);
         assert_eq!(
-            apt_cmd,
-            vec!["sudo", "apt-get", "install", "libfoo", "libbar"]
+            pacman_root,
+            vec!["pacman", "-S", "--needed", "libfoo", "libbar"]
         );
+
+        let apt_root = HostPackageManagerKind::Apt.build_install_command_for(&pkgs, true);
+        assert_eq!(apt_root, vec!["apt-get", "install", "libfoo", "libbar"]);
     }
 }

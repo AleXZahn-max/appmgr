@@ -64,9 +64,6 @@ _appmgr() {
             appmgr,remove)
                 cmd="appmgr__subcmd__remove"
                 ;;
-            appmgr,repo)
-                cmd="appmgr__subcmd__repo"
-                ;;
             appmgr,rollback)
                 cmd="appmgr__subcmd__rollback"
                 ;;
@@ -142,9 +139,6 @@ _appmgr() {
             appmgr__subcmd__help,remove)
                 cmd="appmgr__subcmd__help__subcmd__remove"
                 ;;
-            appmgr__subcmd__help,repo)
-                cmd="appmgr__subcmd__help__subcmd__repo"
-                ;;
             appmgr__subcmd__help,rollback)
                 cmd="appmgr__subcmd__help__subcmd__rollback"
                 ;;
@@ -181,23 +175,26 @@ _appmgr() {
             appmgr__subcmd__help__subcmd__pkg,test)
                 cmd="appmgr__subcmd__help__subcmd__pkg__subcmd__test"
                 ;;
-            appmgr__subcmd__help__subcmd__repo,add)
-                cmd="appmgr__subcmd__help__subcmd__repo__subcmd__add"
+            appmgr__subcmd__help__subcmd__source,add)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__add"
                 ;;
-            appmgr__subcmd__help__subcmd__repo,disable)
-                cmd="appmgr__subcmd__help__subcmd__repo__subcmd__disable"
+            appmgr__subcmd__help__subcmd__source,disable)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__disable"
                 ;;
-            appmgr__subcmd__help__subcmd__repo,enable)
-                cmd="appmgr__subcmd__help__subcmd__repo__subcmd__enable"
-                ;;
-            appmgr__subcmd__help__subcmd__repo,list)
-                cmd="appmgr__subcmd__help__subcmd__repo__subcmd__list"
-                ;;
-            appmgr__subcmd__help__subcmd__repo,remove)
-                cmd="appmgr__subcmd__help__subcmd__repo__subcmd__remove"
+            appmgr__subcmd__help__subcmd__source,enable)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__enable"
                 ;;
             appmgr__subcmd__help__subcmd__source,lint)
                 cmd="appmgr__subcmd__help__subcmd__source__subcmd__lint"
+                ;;
+            appmgr__subcmd__help__subcmd__source,list)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__list"
+                ;;
+            appmgr__subcmd__help__subcmd__source,new)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__new"
+                ;;
+            appmgr__subcmd__help__subcmd__source,remove)
+                cmd="appmgr__subcmd__help__subcmd__source__subcmd__remove"
                 ;;
             appmgr__subcmd__help__subcmd__source,test)
                 cmd="appmgr__subcmd__help__subcmd__source__subcmd__test"
@@ -226,41 +223,14 @@ _appmgr() {
             appmgr__subcmd__pkg__subcmd__help,test)
                 cmd="appmgr__subcmd__pkg__subcmd__help__subcmd__test"
                 ;;
-            appmgr__subcmd__repo,add)
-                cmd="appmgr__subcmd__repo__subcmd__add"
+            appmgr__subcmd__source,add)
+                cmd="appmgr__subcmd__source__subcmd__add"
                 ;;
-            appmgr__subcmd__repo,disable)
-                cmd="appmgr__subcmd__repo__subcmd__disable"
+            appmgr__subcmd__source,disable)
+                cmd="appmgr__subcmd__source__subcmd__disable"
                 ;;
-            appmgr__subcmd__repo,enable)
-                cmd="appmgr__subcmd__repo__subcmd__enable"
-                ;;
-            appmgr__subcmd__repo,help)
-                cmd="appmgr__subcmd__repo__subcmd__help"
-                ;;
-            appmgr__subcmd__repo,list)
-                cmd="appmgr__subcmd__repo__subcmd__list"
-                ;;
-            appmgr__subcmd__repo,remove)
-                cmd="appmgr__subcmd__repo__subcmd__remove"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,add)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__add"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,disable)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__disable"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,enable)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__enable"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,help)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__help"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,list)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__list"
-                ;;
-            appmgr__subcmd__repo__subcmd__help,remove)
-                cmd="appmgr__subcmd__repo__subcmd__help__subcmd__remove"
+            appmgr__subcmd__source,enable)
+                cmd="appmgr__subcmd__source__subcmd__enable"
                 ;;
             appmgr__subcmd__source,help)
                 cmd="appmgr__subcmd__source__subcmd__help"
@@ -268,14 +238,41 @@ _appmgr() {
             appmgr__subcmd__source,lint)
                 cmd="appmgr__subcmd__source__subcmd__lint"
                 ;;
+            appmgr__subcmd__source,list)
+                cmd="appmgr__subcmd__source__subcmd__list"
+                ;;
+            appmgr__subcmd__source,new)
+                cmd="appmgr__subcmd__source__subcmd__new"
+                ;;
+            appmgr__subcmd__source,remove)
+                cmd="appmgr__subcmd__source__subcmd__remove"
+                ;;
             appmgr__subcmd__source,test)
                 cmd="appmgr__subcmd__source__subcmd__test"
+                ;;
+            appmgr__subcmd__source__subcmd__help,add)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__add"
+                ;;
+            appmgr__subcmd__source__subcmd__help,disable)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__disable"
+                ;;
+            appmgr__subcmd__source__subcmd__help,enable)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__enable"
                 ;;
             appmgr__subcmd__source__subcmd__help,help)
                 cmd="appmgr__subcmd__source__subcmd__help__subcmd__help"
                 ;;
             appmgr__subcmd__source__subcmd__help,lint)
                 cmd="appmgr__subcmd__source__subcmd__help__subcmd__lint"
+                ;;
+            appmgr__subcmd__source__subcmd__help,list)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__list"
+                ;;
+            appmgr__subcmd__source__subcmd__help,new)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__new"
+                ;;
+            appmgr__subcmd__source__subcmd__help,remove)
+                cmd="appmgr__subcmd__source__subcmd__help__subcmd__remove"
                 ;;
             appmgr__subcmd__source__subcmd__help,test)
                 cmd="appmgr__subcmd__source__subcmd__help__subcmd__test"
@@ -287,7 +284,7 @@ _appmgr() {
 
     case "${cmd}" in
         appmgr)
-            opts="-y -h -V --yes --system --user --color --help --version install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="-y -h -V --yes --system --user --color --help --version install search update source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -435,7 +432,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__help)
-            opts="install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="install search update source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -714,90 +711,6 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        appmgr__subcmd__help__subcmd__repo)
-            opts="list add remove enable disable"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__help__subcmd__repo__subcmd__add)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__help__subcmd__repo__subcmd__disable)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__help__subcmd__repo__subcmd__enable)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__help__subcmd__repo__subcmd__list)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__help__subcmd__repo__subcmd__remove)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
         appmgr__subcmd__help__subcmd__rollback)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -855,7 +768,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__help__subcmd__source)
-            opts="lint test"
+            opts="list add remove enable disable new lint test"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -868,7 +781,91 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__add)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__disable)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__enable)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         appmgr__subcmd__help__subcmd__source__subcmd__lint)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__new)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__help__subcmd__source__subcmd__remove)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1244,224 +1241,6 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        appmgr__subcmd__repo)
-            opts="-y -h --yes --system --user --color --help list add remove enable disable help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__add)
-            opts="-y -h --suite --components --priority --yes --system --user --color --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --suite)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
-                --components)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
-                --priority)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__disable)
-            opts="-y -h --yes --system --user --color --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__enable)
-            opts="-y -h --yes --system --user --color --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help)
-            opts="list add remove enable disable help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__add)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__disable)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__enable)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__help)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__list)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__help__subcmd__remove)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__list)
-            opts="-y -h --json --yes --system --user --color --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        appmgr__subcmd__repo__subcmd__remove)
-            opts="-y -h --yes --system --user --color --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --color)
-                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
         appmgr__subcmd__rollback)
             opts="-y -h --yes --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
@@ -1543,7 +1322,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__source)
-            opts="-y -h --yes --system --user --color --help lint test help"
+            opts="-y -h --yes --system --user --color --help list add remove enable disable new lint test help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1560,9 +1339,117 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        appmgr__subcmd__source__subcmd__help)
-            opts="lint test help"
+        appmgr__subcmd__source__subcmd__add)
+            opts="-y -h --suite --components --priority --yes --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --suite)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --components)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --priority)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__disable)
+            opts="-y -h --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__enable)
+            opts="-y -h --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help)
+            opts="list add remove enable disable new lint test help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__add)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__disable)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__enable)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1589,6 +1476,48 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__source__subcmd__help__subcmd__lint)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__new)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__help__subcmd__remove)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1634,8 +1563,70 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        appmgr__subcmd__source__subcmd__test)
+        appmgr__subcmd__source__subcmd__list)
+            opts="-y -h --json --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__new)
+            opts="-o -y -h --output --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --output)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__remove)
             opts="-y -h --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__source__subcmd__test)
+            opts="-y -h --dry-run --yes --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

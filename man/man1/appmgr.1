@@ -1,4 +1,4 @@
-.TH APPMGR 1 "November 2026" "appmgr 2.3.0" "User Commands"
+.TH APPMGR 1 "November 2026" "appmgr 2.4.0" "User Commands"
 .SH NAME
 appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with Package Registry and GitHub integration
 .SH SYNOPSIS
@@ -28,13 +28,9 @@ Searches local package registry databases and upstream GitHub repositories for a
 \fBupdate\fR, \fBsync\fR
 Synchronizes local repository databases from configured package registries in sources.list using ETag caching and concurrent retrieval.
 .TP
-\fBrepo\fR, \fBsources\fR \fISUBCOMMAND\fR
-Manages package repositories in \fB~/.config/appmgr/sources.list\fR (or \fB/etc/appmgr/sources.list\fR).
-Subcommands: \fBlist [--json]\fR, \fBadd <driver> <id> <url>\fR, \fBremove <id>\fR, \fBenable <id>\fR, \fBdisable <id>\fR.
-.TP
-\fBsource\fR \fISUBCOMMAND\fR
-Validates and tests Schema v2 TOML source definitions.
-Subcommands: \fBlint <file.toml>\fR, \fBtest <file.toml>\fR.
+\fBsource\fR, \fBrepo\fR, \fBsources\fR \fISUBCOMMAND\fR
+Manages package sources in \fB~/.config/appmgr/sources.list\fR (or \fB/etc/appmgr/sources.list\fR) and validates Schema v2 TOML source definitions.
+Subcommands: \fBlist [--json]\fR, \fBadd <driver> <id> <url>\fR, \fBremove <id>\fR, \fBenable <id>\fR, \fBdisable <id>\fR, \fBnew <id> [-o file.toml]\fR, \fBlint <file.toml>\fR, \fBtest <file.toml> [--dry-run]\fR.
 .TP
 \fBpkg\fR \fISUBCOMMAND\fR
 Maintainer tools for Schema v2 source recipe creation, validation, and testing.

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.4.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.3.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.4.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Fetching release metadata from GitHub: aristocratos/btop                           │
 │                                                                                        │
@@ -178,34 +178,29 @@ appmgr update
 appmgr sync
 ```
 
-### 2. Managing Software Sources & Repositories (`repo`, `sources`)
-Manage upstream APT repositories, AppImageHub, AUR endpoints, and meta-registries:
+### 2. Managing Software Sources & Recipes (`source`, `repo`)
+Manage upstream APT repositories, AppImageHub, AUR endpoints, meta-registries, and Schema v2 source recipes (note: `repo` and `sources` remain supported aliases for `source`):
 ```bash
-# List configured sources (tabular overview with package counts):
-appmgr repo list
+# List configured sources (tabular overview with instant package counts):
+appmgr source list
 
 # List configured sources in JSON format:
-appmgr repo list --json
+appmgr source list --json
 
-# Add a direct APT source:
-appmgr repo add apt my-repo https://example.com/debian --suite stable --components main --priority 600
+# Add a direct APT source (supports comma- or space-separated components):
+appmgr source add apt my-repo https://example.com/debian --suite stable --components main,contrib --priority 600
 
 # Temporarily disable or re-enable a source:
-appmgr repo disable apt-vscode
-appmgr repo enable apt-vscode
+appmgr source disable apt-vscode
+appmgr source enable apt-vscode
 
-# Remove a source and purge its cache:
-appmgr repo remove my-repo
-```
+# Remove a source and purge its index, metadata, and ETag cache:
+appmgr source remove my-repo
 
-### 3. Source Recipe & Maintainer Tools (`source`, `pkg`)
-Validate and test Schema v2 declarative source definition recipes:
-```bash
-# Lint a Schema v2 source definition:
+# Generate, lint, and dry-run test a Schema v2 source definition:
+appmgr source new my-source
 appmgr source lint sources/apt-gh.toml
-
-# Test network reachability and index parsing for a source definition:
-appmgr source test sources/apt-gh.toml
+appmgr source test sources/apt-gh.toml --dry-run
 ```
 
 ### 4. Searching Applications (`search`)

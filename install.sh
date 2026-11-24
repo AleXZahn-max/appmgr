@@ -6,7 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_BIN="$HOME/.local/bin"
 APPMGR_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$SCRIPT_DIR/Cargo.toml" | head -n 1)"
-APPMGR_VERSION="${APPMGR_VERSION:-2.3.0}"
+APPMGR_VERSION="${APPMGR_VERSION:-2.4.0}"
 
 echo -e "\033[1;36m::\033[0m \033[1;37mBuilding and installing appmgr v${APPMGR_VERSION} (Rust)...\033[0m"
 
