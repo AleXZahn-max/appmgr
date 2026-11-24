@@ -44,7 +44,7 @@ pub async fn search_aur(
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "appmgr/2.1.0")
+        .header("User-Agent", concat!("appmgr/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|e| format!("Failed to query AUR RPC: {}", e))?;
@@ -71,7 +71,7 @@ pub async fn get_aur_info(
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "appmgr/2.1.0")
+        .header("User-Agent", concat!("appmgr/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|e| format!("Failed to query AUR info: {}", e))?;
@@ -116,8 +116,16 @@ pub async fn install_aur_package(
         println!("   Depends:     {}", info.depends.join(", "));
     }
 
+    println!(
+        "{} AUR packages are built via 'makepkg' and installed into the host system database, bypassing appmgr rootless isolation.",
+        apt_prefix("WARN")
+    );
+
     if !assume_yes && !confirm_dialog("Proceed with building and installing from AUR?", true) {
-        println!("{} Installation aborted by user.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
+        println!(
+            "{} Installation aborted by user.",
+            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE])
+        );
         return Ok(false);
     }
 
@@ -128,14 +136,17 @@ pub async fn install_aur_package(
         "https://aur.archlinux.org/cgit/aur.git/snapshot/{}.tar.gz",
         info.package_base
     );
-    let tar_path = temp_dir.path().join(format!("{}.tar.gz", info.package_base));
+    let tar_path = temp_dir
+        .path()
+        .join(format!("{}.tar.gz", info.package_base));
 
     println!("{} Downloading snapshot from AUR...", apt_prefix("INFO"));
-    let resp = client
-        .get(&snapshot_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to download AUR snapshot from {}: {}", snapshot_url, e))?;
+    let resp = client.get(&snapshot_url).send().await.map_err(|e| {
+        format!(
+            "Failed to download AUR snapshot from {}: {}",
+            snapshot_url, e
+        )
+    })?;
 
     if !resp.status().is_success() {
         return Err(format!("AUR snapshot returned HTTP {}", resp.status()));
@@ -148,19 +159,20 @@ pub async fn install_aur_package(
     std::fs::write(&tar_path, bytes)
         .map_err(|e| format!("Failed to save snapshot archive: {}", e))?;
 
-    // Unpack tarball
-    let tar_file = File::open(&tar_path)
-        .map_err(|e| format!("Failed to open snapshot archive: {}", e))?;
+    // Unpack tarball safely (Tar Slip defense)
+    let tar_file =
+        File::open(&tar_path).map_err(|e| format!("Failed to open snapshot archive: {}", e))?;
     let tar = flate2::read::GzDecoder::new(tar_file);
-    let mut archive = tar::Archive::new(tar);
-    archive
-        .unpack(temp_dir.path())
-        .map_err(|e| format!("Failed to unpack AUR snapshot: {}", e))?;
+    crate::formats::archive::ArchivePackage::extract_tar_safe(tar, temp_dir.path())
+        .map_err(|e| format!("Failed to unpack AUR snapshot safely: {}", e))?;
 
     let pkg_dir = temp_dir.path().join(&info.package_base);
     let pkgbuild_file = pkg_dir.join("PKGBUILD");
     if !pkgbuild_file.exists() {
-        return Err(format!("PKGBUILD not found in AUR snapshot: {}", pkgbuild_file.display()));
+        return Err(format!(
+            "PKGBUILD not found in AUR snapshot: {}",
+            pkgbuild_file.display()
+        ));
     }
 
     println!(

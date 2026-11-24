@@ -9,8 +9,31 @@ permissions:
   contents: write
 
 jobs:
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked
+
   build-release:
     name: Build (${{ matrix.target }})
+    needs: quality-gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,6 +68,7 @@ jobs:
           mkdir -p "$ARCHIVE_DIR/completions" "dist"
           cp "$BIN_PATH" "$ARCHIVE_DIR/"
           cp README.md LICENSE "$ARCHIVE_DIR/"
+          [ -f man/man1/appmgr.1 ] && cp man/man1/appmgr.1 "$ARCHIVE_DIR/"
           "$BIN_PATH" completions bash > "$ARCHIVE_DIR/completions/appmgr.bash"
           "$BIN_PATH" completions zsh > "$ARCHIVE_DIR/completions/_appmgr"
           "$BIN_PATH" completions fish > "$ARCHIVE_DIR/completions/appmgr.fish"
@@ -79,12 +103,9 @@ jobs:
       - name: Flatten artifacts and generate SHA256SUMS
         run: |
           cd dist
-          # Ensure all downloaded files are flattened into dist/ even if nested in artifact subfolders
           find . -mindepth 2 -type f -exec mv -t . {} +
-          # Remove any leftover subdirectories
           find . -mindepth 1 -type d -exec rm -rf {} +
           ls -la
-          # Generate clean SHA256SUMS for regular release files
           rm -f SHA256SUMS
           for f in appmgr-*-linux *.tar.gz; do
             [ -f "$f" ] && sha256sum "$f"

@@ -8,8 +8,8 @@ mod doctor;
 mod drivers;
 mod formats;
 mod github;
+mod launcher;
 mod registry;
-mod sandbox;
 #[cfg(feature = "self-update")]
 mod self_update;
 mod ui;
@@ -22,51 +22,89 @@ use doctor::Doctor;
 #[cfg(feature = "self-update")]
 use self_update::SelfUpdater;
 use std::io;
-use ui::print_banner;
+use ui::{print_banner, set_color_mode, ColorMode};
+
+fn resolve_initial_color_mode(cli_color: Option<cli::ColorArg>) -> ColorMode {
+    match cli_color {
+        Some(c) => c.into(),
+        None => ColorMode::Auto,
+    }
+}
+
+fn resolve_effective_color_mode(
+    cli_color: Option<cli::ColorArg>,
+    config_color: ColorMode,
+) -> ColorMode {
+    match cli_color {
+        Some(c) => c.into(),
+        None => {
+            if ui::env_disables_color() {
+                ColorMode::Never
+            } else {
+                config_color
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
-    // Global signal handler for graceful Ctrl+C cancellation
     tokio::spawn(async {
         let _ = tokio::signal::ctrl_c().await;
         ui::restore_cursor();
-        eprintln!("\n{} Operation interrupted by user.", ui::apt_prefix("WARN"));
+        eprintln!(
+            "\n{} Operation interrupted by user.",
+            ui::apt_prefix_err("WARN")
+        );
         std::process::exit(130);
     });
 
     let args = Cli::parse();
+    set_color_mode(resolve_initial_color_mode(args.color));
 
-    let cmd = match args.command {
-        Some(c) => c,
-        None => {
-            print_banner();
-            let mut cmd = Cli::command();
-            let _ = cmd.print_help();
-            println!();
-            return;
-        }
-    };
-
-    if let Commands::Completions { shell } = cmd {
+    if let Some(Commands::Completions { shell }) = args.command {
         let mut cmd = Cli::command();
         clap_complete::generate(shell, &mut cmd, "appmgr", &mut io::stdout());
+        return;
+    }
+
+    if args.command.is_none() {
+        if let Ok(cfg) = Config::new(args.system, args.user) {
+            set_color_mode(resolve_effective_color_mode(
+                args.color,
+                cfg.settings.color.into(),
+            ));
+        }
+        print_banner();
         return;
     }
 
     let config = match Config::new(args.system, args.user) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error initializing configuration: {}", e);
+            eprintln!("{} {}", ui::apt_prefix_err("FAIL"), e);
             std::process::exit(1);
         }
     };
 
+    set_color_mode(resolve_effective_color_mode(
+        args.color,
+        config.settings.color.into(),
+    ));
+
+    let cmd = args.command.unwrap();
     let global_yes = args.yes;
-    let mut core = Core::new(&config);
+    let mut core = match Core::new(&config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{} {}", ui::apt_prefix_err("FAIL"), e);
+            std::process::exit(1);
+        }
+    };
 
     let res = match cmd {
         Commands::Install {
-            package,
+            packages,
             force,
             yes,
             repo,
@@ -75,9 +113,10 @@ async fn main() {
             auto_deps,
             no_deps,
             rootless_deps,
+            isolate,
         } => {
-            core.install(
-                &package,
+            core.install_batch(
+                &packages,
                 force,
                 yes || global_yes,
                 repo,
@@ -86,15 +125,21 @@ async fn main() {
                 auto_deps,
                 no_deps,
                 rootless_deps,
+                isolate,
             )
             .await
-            .map(|_| ())
         }
-        Commands::Search { query, source, driver, offline } => {
-            core.search(&query, source.as_deref(), driver.as_deref(), offline).await
+        Commands::Search {
+            query,
+            source,
+            driver,
+            offline,
+            json,
+        } => {
+            core.search(&query, source.as_deref(), driver.as_deref(), offline, json)
+                .await
         }
         Commands::Update => core.sync_databases().await,
-        Commands::Repo { command } => core.repo_manage(command),
         Commands::Source { command } => core.source_manage(command).await,
         Commands::Deps {
             app,
@@ -102,8 +147,10 @@ async fn main() {
             fix,
             auto_deps,
             rootless_deps,
+            json,
         } => {
-            core.deps_manage(app, all, fix, auto_deps, rootless_deps).await
+            core.deps_manage(app, all, fix, auto_deps, rootless_deps, json)
+                .await
         }
         Commands::Pkg { command } => core.pkg_manage(command).await,
         Commands::Link { app, repo } => core.link(&app, &repo).await.map(|_| ()),
@@ -114,6 +161,7 @@ async fn main() {
             force,
             prefer,
             pre,
+            notes,
             json,
         } => core
             .upgrade(
@@ -123,30 +171,19 @@ async fn main() {
                 prefer.map(|p| p.as_str()),
                 pre,
                 force,
+                notes,
                 json,
             )
             .await
             .map(|_| ()),
-        Commands::Remove { package, yes } => {
-            core.remove(&package, yes || global_yes).map(|_| ())
-        }
+        Commands::Remove { packages, yes } => core.remove_batch(&packages, yes || global_yes),
         Commands::List { filter_type, json } => {
             core.list_installed(filter_type.as_deref(), json);
             Ok(())
         }
-        Commands::Info { target } => {
-            core.info(&target);
-            Ok(())
-        }
-        Commands::Doctor => {
-            let doc = Doctor::new(&config);
-            doc.run_all_checks();
-            Ok(())
-        }
-        Commands::Run { app, args } => {
-            core.run_app(&app, &args);
-            Ok(())
-        }
+        Commands::Info { target, json } => core.info(&target, json),
+        Commands::Doctor { json } => Doctor::new(&config).and_then(|doc| doc.run_all_checks(json)),
+        Commands::Run { app, args } => core.run_app(&app, &args),
         Commands::Env {
             app,
             pairs,
@@ -160,19 +197,38 @@ async fn main() {
             cli_args,
             clear,
             list,
+        } => core.args_manage(&app, &cli_args, clear, list).map(|_| ()),
+        Commands::Sandbox {
+            app,
+            profile,
+            no_net,
+            allow_net,
+            home_dir,
+            reset,
         } => core
-            .args_manage(&app, &cli_args, clear, list)
+            .sandbox_manage(
+                &app,
+                profile.map(Into::into),
+                no_net,
+                allow_net,
+                home_dir,
+                reset,
+            )
             .map(|_| ()),
-        Commands::Pin { app } => core.pin_app(&app).map(|_| ()),
-        Commands::Unpin { app } => core.unpin_app(&app).map(|_| ()),
-        Commands::Rollback { app, yes } => {
-            core.rollback(&app, yes || global_yes).map(|_| ())
-        }
+        Commands::Pin { apps } => core.pin_batch(&apps),
+        Commands::Unpin { apps } => core.unpin_batch(&apps),
+        Commands::Rollback { app, yes } => core.rollback(&app, yes || global_yes).map(|_| ()),
         Commands::Clean { yes } => core.clean(yes || global_yes).map(|_| ()),
         Commands::Export { file } => core.export_manifest(file.as_deref()).map(|_| ()),
-        Commands::Import { file, yes } => {
-            core.import_manifest(&file, yes || global_yes).await.map(|_| ())
-        }
+        Commands::Import {
+            file,
+            diff,
+            apply,
+            yes,
+        } => core
+            .import_manifest(&file, diff, apply, yes || global_yes)
+            .await
+            .map(|_| ()),
         Commands::UpdateDb => {
             desktop::run_system_triggers(&config.applications_dir, &config.icons_dir);
             Ok(())
@@ -180,16 +236,13 @@ async fn main() {
         #[cfg(feature = "self-update")]
         Commands::SelfUpdate { check, pre, yes } => {
             let updater = SelfUpdater::new();
-            updater
-                .run(check, pre, yes || global_yes)
-                .await
-                .map(|_| ())
+            updater.run(check, pre, yes || global_yes).await.map(|_| ())
         }
         Commands::Completions { .. } => unreachable!(),
     };
 
     if let Err(e) = res {
-        eprintln!("{}", e);
+        eprintln!("{} {}", ui::apt_prefix_err("FAIL"), e);
         std::process::exit(1);
     }
 }

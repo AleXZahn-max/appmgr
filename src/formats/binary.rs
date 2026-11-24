@@ -1,10 +1,10 @@
 use crate::config::Config;
 use crate::db::PackageRecord;
-use crate::desktop::{create_desktop_entry, is_gui_binary};
-use goblin::elf::Elf;
+use crate::desktop::{create_desktop_entry, inspect_elf_headers, is_gui_binary};
+use crate::formats::StagingDirGuard;
+use crate::launcher::write_package_launchers;
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -47,19 +47,15 @@ impl BinaryPackage {
     }
 
     pub fn read_metadata(&self) -> Result<(String, String, String, u64), String> {
-        let mut buffer = Vec::new();
-        let mut file = File::open(&self.file_path)
-            .map_err(|e| format!("Failed to open binary {}: {}", self.file_path.display(), e))?;
-        file.read_to_end(&mut buffer)
-            .map_err(|e| format!("Failed to read binary: {}", e))?;
+        let size = fs::metadata(&self.file_path)
+            .map_err(|e| format!("Failed to open binary {}: {}", self.file_path.display(), e))?
+            .len();
 
-        if buffer.len() < 4 || &buffer[..4] != b"\x7fELF" {
-            return Err("File is not a valid ELF binary".to_string());
-        }
+        let elf_hdr = inspect_elf_headers(&self.file_path)
+            .ok_or_else(|| "File is not a valid ELF binary".to_string())?;
 
-        let elf = Elf::parse(&buffer).map_err(|e| format!("Corrupt ELF header: {}", e))?;
-        let is_executable = elf.header.e_type == goblin::elf::header::ET_EXEC
-            || (elf.header.e_type == goblin::elf::header::ET_DYN && elf.entry != 0);
+        let is_executable = elf_hdr.e_type == goblin::elf::header::ET_EXEC
+            || (elf_hdr.e_type == goblin::elf::header::ET_DYN && elf_hdr.entry != 0);
 
         if !is_executable {
             return Err("ELF file is not an executable binary".to_string());
@@ -79,7 +75,6 @@ impl BinaryPackage {
             .unwrap_or_else(|| Self::sanitize_name(raw_name));
         let version = self.tag.clone().unwrap_or_else(|| "1.0.0".to_string());
         let desc = format!("Standalone binary executable: {}", pkg_id);
-        let size = buffer.len() as u64;
 
         Ok((pkg_id, version, desc, size))
     }
@@ -93,18 +88,16 @@ impl BinaryPackage {
         let (pkg_id, version, desc, size) = self.read_metadata()?;
         let app_dir = self.config.apps_dir.join(&pkg_id);
 
-        if app_dir.exists() {
-            if force {
-                let _ = fs::remove_dir_all(&app_dir);
-            } else {
-                return Err(format!(
-                    "Package directory already exists: {}. Use -f to overwrite.",
-                    app_dir.display()
-                ));
-            }
+        if app_dir.exists() && !force {
+            return Err(format!(
+                "Package directory already exists: {}. Use -f to overwrite.",
+                app_dir.display()
+            ));
         }
 
-        let target_bin_dir = app_dir.join("bin");
+        let mut staging = StagingDirGuard::new(&self.config.apps_dir, &pkg_id)?;
+        let stage_path = staging.path.clone();
+        let target_bin_dir = stage_path.join("bin");
         fs::create_dir_all(&target_bin_dir)
             .map_err(|e| format!("Failed to create app bin dir: {}", e))?;
 
@@ -114,52 +107,44 @@ impl BinaryPackage {
         fs::set_permissions(&deployed_bin, fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("Failed to set permissions: {}", e))?;
 
+        let is_gui = is_gui_binary(&deployed_bin);
+
+        staging.commit_swap(&stage_path, &app_dir, force)?;
+
         let launcher_path = self.config.bin_dir.join(&pkg_id);
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
+        let now = chrono::Local::now().to_rfc3339();
 
-        let mut env_lines = Vec::new();
-        for (k, v) in &env_map {
-            env_lines.push(format!("export {}=\"{}\"", k, v));
-        }
-        let env_block = if env_lines.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}", env_lines.join("\n"))
+        let mut record = PackageRecord {
+            id: pkg_id.clone(),
+            name: pkg_id.clone(),
+            version,
+            format: "bin".to_string(),
+            mode: self.config.mode.clone(),
+            install_date: now,
+            install_dir: app_dir,
+            source_file: Some(self.file_path.to_string_lossy().to_string()),
+            entrypoint: Some(PathBuf::from("bin").join(&pkg_id)),
+            binaries: vec![launcher_path.clone()],
+            desktop_files: Vec::new(),
+            icons: Vec::new(),
+            installed_files_count: Some(1),
+            total_size_bytes: Some(size),
+            is_gui: Some(is_gui),
+            description: Some(desc.clone()),
+            repo: self.repo.clone(),
+            tag: self.tag.clone(),
+            etag: None,
+            asset_pattern: None,
+            env: env_map,
+            args: args_vec,
+            pinned: false,
+            ..Default::default()
         };
 
-        let args_block = if args_vec.is_empty() {
-            "\nPERSISTENT_ARGS=()\n".to_string()
-        } else {
-            let quoted: Vec<String> = args_vec.iter().map(|a| format!("    \"{}\"", a)).collect();
-            format!("\nPERSISTENT_ARGS=(\n{}\n)\n", quoted.join("\n"))
-        };
+        write_package_launchers(&record, &self.config.bin_dir)?;
 
-        let script = format!(
-            r#"#!/usr/bin/env bash
-# Wrapper created by appmgr for {pkg_id} (Standalone binary)
-APP_ROOT="{app_dir}"
-export PATH="$APP_ROOT/bin:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/lib:${{LD_LIBRARY_PATH}}"{env_block}
-{args_block}
-exec "$APP_ROOT/bin/{pkg_id}" "${{PERSISTENT_ARGS[@]}}" "$@"
-"#,
-            pkg_id = pkg_id,
-            app_dir = app_dir.display(),
-            env_block = env_block,
-            args_block = args_block,
-        );
-
-        if let Some(parent) = launcher_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        fs::write(&launcher_path, script)
-            .map_err(|e| format!("Failed to write launcher: {}", e))?;
-        fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to chmod launcher: {}", e))?;
-
-        let is_gui = is_gui_binary(&deployed_bin);
-        let mut desktop_files = Vec::new();
         if is_gui {
             let dt_path = self
                 .config
@@ -175,35 +160,10 @@ exec "$APP_ROOT/bin/{pkg_id}" "${{PERSISTENT_ARGS[@]}}" "$@"
             )
             .is_ok()
             {
-                desktop_files.push(dt_path);
+                record.desktop_files.push(dt_path);
             }
         }
 
-        let now = chrono::Local::now().to_rfc3339();
-        Ok(PackageRecord {
-            id: pkg_id.clone(),
-            name: pkg_id,
-            version,
-            format: "bin".to_string(),
-            mode: self.config.mode.clone(),
-            install_date: now,
-            install_dir: app_dir,
-            source_file: Some(self.file_path.to_string_lossy().to_string()),
-            binaries: vec![launcher_path],
-            desktop_files,
-            icons: Vec::new(),
-            installed_files_count: Some(1),
-            total_size_bytes: Some(size),
-            is_gui: Some(is_gui),
-            description: Some(desc),
-            repo: self.repo.clone(),
-            tag: self.tag.clone(),
-            etag: None,
-            asset_pattern: None,
-            env: env_map,
-            args: args_vec,
-            pinned: false,
-            ..Default::default()
-        })
+        Ok(record)
     }
 }

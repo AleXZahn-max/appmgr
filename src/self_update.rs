@@ -25,6 +25,27 @@ impl SelfUpdater {
         }
     }
 
+    /// Quietly checks GitHub Releases for a newer appmgr version. Returns `Some(version)` if newer.
+    pub async fn check_latest_version(&self, include_pre: bool) -> Option<String> {
+        let (status, release_opt, _, _) = self
+            .client
+            .get_release(Self::REPO, None, include_pre, None)
+            .await
+            .ok()?;
+        if status != StatusCode::OK {
+            return None;
+        }
+        let release = release_opt?;
+        let latest = release.tag_name.trim_start_matches('v');
+        if GitHubClient::compare_versions(latest, Self::CURRENT_VERSION)
+            == std::cmp::Ordering::Greater
+        {
+            Some(latest.to_string())
+        } else {
+            None
+        }
+    }
+
     pub async fn run(
         &self,
         check_only: bool,
@@ -45,7 +66,11 @@ impl SelfUpdater {
         spinner.stop();
 
         if status != StatusCode::OK {
-            println!(" {} No release found for {}", apt_prefix("WARN"), Self::REPO);
+            println!(
+                " {} No release found for {}",
+                apt_prefix("WARN"),
+                Self::REPO
+            );
             return Ok(false);
         }
 
@@ -91,7 +116,6 @@ impl SelfUpdater {
         let current_exe = std::env::current_exe()
             .map_err(|e| format!("Failed to determine current executable path: {}", e))?;
 
-        // 1. Check if binary is managed by Pacman
         let pacman_check = Command::new("pacman")
             .args(["-Qo", &current_exe.to_string_lossy()])
             .output();
@@ -103,32 +127,40 @@ impl SelfUpdater {
                     "\n{} appmgr is managed by the system package manager (pacman):",
                     apt_prefix("WARN")
                 );
-                println!("        {}", c(stdout_str.trim(), &[Colors::DIM, Colors::WHITE]));
+                println!(
+                    "        {}",
+                    c(stdout_str.trim(), &[Colors::DIM, Colors::WHITE])
+                );
                 println!(
                     "        Automatic binary replacement is disabled to prevent database divergence."
                 );
                 println!("        To update, please use:");
                 println!(
                     "        {}",
-                    c("cd appmgr && makepkg -si", &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+                    c(
+                        "cd appmgr && makepkg -si",
+                        &[Colors::BOLD, Colors::BRIGHT_YELLOW]
+                    )
                 );
                 println!();
                 return Ok(true);
             }
         }
 
-        // 2. Direct binary update
         if !assume_yes
-            && !confirm_dialog(
-                &format!("Update appmgr to version {}?", latest_tag),
-                true,
-            ) {
-                println!("{} Update cancelled by user.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                return Ok(false);
-            }
+            && !confirm_dialog(&format!("Update appmgr to version {}?", latest_tag), true)
+        {
+            println!(
+                "{} Update cancelled by user.",
+                c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE])
+            );
+            return Ok(false);
+        }
 
         let host_arch = std::env::consts::ARCH;
-        let candidates = self.client.filter_assets(&release.assets, Some("bin"), None, Some("appmgr"));
+        let candidates =
+            self.client
+                .filter_assets(&release.assets, Some("bin"), None, Some("appmgr"));
 
         let chosen = candidates.iter().find(|c| {
             let lower = c.name.to_lowercase();
@@ -172,41 +204,43 @@ impl SelfUpdater {
             )
             .await?;
 
-        let parent_dir = current_exe
-            .parent()
-            .ok_or_else(|| "Failed to determine parent directory of current executable".to_string())?;
+        let parent_dir = current_exe.parent().ok_or_else(|| {
+            "Failed to determine parent directory of current executable".to_string()
+        })?;
 
         let pid = std::process::id();
         let staged_bin = parent_dir.join(format!(".appmgr.new.{}", pid));
         let backup_bin = parent_dir.join(format!(".appmgr.bak.{}", pid));
 
-        // 1. Copy downloaded new binary to staging file on the same filesystem
         if let Err(e) = fs::copy(&temp_new_bin, &staged_bin) {
             let _ = fs::remove_file(&staged_bin);
-            return Err(format!("Failed to stage new binary in {}: {}", parent_dir.display(), e));
+            return Err(format!(
+                "Failed to stage new binary in {}: {}",
+                parent_dir.display(),
+                e
+            ));
         }
 
-        // 2. Set executable permissions
         if let Err(e) = fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)) {
             let _ = fs::remove_file(&staged_bin);
             return Err(format!("Failed to set permissions on staged binary: {}", e));
         }
 
-        // 3. Move current running binary to backup in the same directory (solves ETXTBSY)
         if let Err(e) = fs::rename(&current_exe, &backup_bin) {
             let _ = fs::remove_file(&staged_bin);
             return Err(format!("Failed to backup current executable: {}", e));
         }
 
-        // 4. Atomically rename staged binary to current_exe on the same filesystem (solves EXDEV)
         if let Err(e) = fs::rename(&staged_bin, &current_exe) {
             let _ = fs::rename(&backup_bin, &current_exe);
             let _ = fs::remove_file(&staged_bin);
             let _ = fs::remove_file(&backup_bin);
-            return Err(format!("Failed to install new executable (rolled back): {}", e));
+            return Err(format!(
+                "Failed to install new executable (rolled back): {}",
+                e
+            ));
         }
 
-        // 5. Clean up backup and staged temporary files
         let _ = fs::remove_file(&backup_bin);
         let _ = fs::remove_file(&staged_bin);
 
@@ -241,11 +275,9 @@ mod tests {
         let staged_bin = parent_dir.join(format!(".appmgr.new.{}", pid));
         let backup_bin = parent_dir.join(format!(".appmgr.bak.{}", pid));
 
-        // Copy across "devices"
         fs::copy(&downloaded, &staged_bin).unwrap();
         fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Atomic swap
         fs::rename(&current_exe, &backup_bin).unwrap();
         fs::rename(&staged_bin, &current_exe).unwrap();
         fs::remove_file(&backup_bin).unwrap();

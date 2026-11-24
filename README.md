@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,25 +15,20 @@
 </div>
 
 ```text
-┌─── appmgr v2.2.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.5.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
-│  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
-│  Reading package lists... Done                                                         │
-│  Building dependency tree... Done                                                      │
+│  :: Fetching release metadata from GitHub: aristocratos/btop                           │
 │                                                                                        │
 │  Packages (1) btop-1.4.0-x86_64.tar.zst [NEW]                                          │
-│                                                                                        │
-│  Total Download Size:    1.82 MiB                                                      │
 │  Total Installed Size:   4.95 MiB                                                      │
 │                                                                                        │
 │  :: Proceed with installation? [Y/n] y                                                 │
-│  (1/1) Downloading btop-x86_64.tar.zst  (████████████ C • • • • • • •)  62%            │
-│  (1/1) Validating SHA-256 checksum...                              [ OK ]              │
-│  (1/1) Unpacking application files...                              [ OK ]              │
-│  :: Setting up environment wrapper into ~/.local/bin/btop...       [ OK ]              │
-│  :: Processing triggers for desktop-file-utils...                  [ OK ]              │
+│  Downloading btop-x86_64.tar.zst [━━━━━━━━━━━━╸─────────]  62% [1.1/1.8 MiB] (4.2 MiB/s)│
+│  [ OK ] SHA-256 verified (e3b0c44298fc...)                                             │
+│  Unpacking btop (1.4.0) ...                                                            │
+│  [ OK ] Installed launcher: ~/.local/bin/btop                                          │
 │                                                                                        │
-│  [ OK ] btop installed successfully! Run with: btop                                    │
+│  :: Transaction completed successfully in 0.42s.                                       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,8 +52,8 @@
 
 ### The Pacman + APT Hybrid Experience
 AppMgr marries the best visual and operational paradigms of two iconic package managers:
-* **From Pacman**: Double-colon prompts (`::`), compact confirmation dialogs (`[Y/n]`), blazing execution speed, and the animated **Candy Pacman progress bar** (`(██████ C • • • •) 45%` — eating dots as files download and unpack).
-* **From APT**: Structured pre-flight verification steps (`Reading package lists... Done`), comprehensive transaction summaries (delta sizes, dependency state, action lists), lifecycle trigger processing (`Processing triggers for desktop-file-utils...`), and clean status badges (`[ OK ]`, `[ WORK ]`, `[ FAIL ]`, `[ WARN ]`).
+* **From Pacman**: Double-colon prompts (`::`), compact confirmation dialogs (`[Y/n]`), blazing execution speed, and a clean progress bar with live throughput (`MiB/s`) and spinner counters.
+* **From APT**: Structured transaction summaries, lifecycle trigger processing (`[TRIG]`), and uniform status badges (`[ OK ]`, `[INFO]`, `[WARN]`, `[FAIL]`, `[WORK]`, `[GET ]`, `[TRIG]`).
 
 ---
 
@@ -70,8 +65,8 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 2. **Zero System Package Manager Conflicts**:
    Applications reside in dedicated rootless directories (`~/.local/share/appmgr/apps/<name>/` or `/opt/appmgr/apps/<name>/` in system mode). Your base system package database remains untouched and pristine.
 
-3. **Transparent `/opt/` Virtualization via Bubblewrap (`bwrap`)**:
-   Heavier proprietary `.deb` packages (e.g., Discord, VS Code, Google Chrome) often hardcode absolute file paths to `/opt/appname/` or `/usr/share/`. AppMgr automatically generates a sandbox wrapper that mounts those directories into an unprivileged user namespace, allowing complex binaries to run out of the box without root privileges.
+3. **Bubblewrap Sandbox Profiles & `/opt/` Virtualization (`bwrap`)**:
+   Heavier proprietary `.deb` packages (e.g., Discord, VS Code, Google Chrome) often hardcode absolute file paths to `/opt/appname/` or `/usr/share/`, and any application can be isolated using `appmgr install --isolate` or `appmgr sandbox <app>` (`none`, `opt-only`, `isolated-home`, `offline`, `--no-net`, `--home-dir`). GUI apps retain Wayland/X11/PipeWire/GPU passthrough while keeping real `$HOME` hidden.
 
 4. **Smart CLI vs GUI Desktop Integration**:
    AppMgr inspects binaries with `goblin` for GUI toolkit linkages (`libX11`, `libwayland`, `libgtk`, `libQt`, `libSDL`, `libGL`).
@@ -143,8 +138,12 @@ sudo dnf install bubblewrap tar xz zstd desktop-file-utils fuse
 
 ## Installation & Building
 
-### Option 1: Fast User Installation (Recommended)
-Builds and installs AppMgr into `~/.local/bin` (no root/sudo required):
+### Option 1: Fast Binary Release Installation (Recommended, No Rust Required)
+Downloads the prebuilt release archive from GitHub Releases, verifies SHA-256 against `SHA256SUMS`, and installs `appmgr` + shell completions into `~/.local/bin`:
+```bash
+curl -fsSL https://raw.githubusercontent.com/AleXZahn-max/appmgr/main/install.sh | bash
+```
+Or clone and run locally (override version via `APPMGR_VERSION=v2.5.0`):
 ```bash
 git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr
@@ -183,34 +182,29 @@ appmgr update
 appmgr sync
 ```
 
-### 2. Managing Software Sources & Repositories (`repo`, `sources`)
-Manage upstream APT repositories, AppImageHub, AUR endpoints, and meta-registries:
+### 2. Managing Software Sources & Recipes (`source`, `repo`)
+Manage upstream APT repositories, AppImageHub, AUR endpoints, meta-registries, and Schema v2 source recipes (note: `repo` and `sources` remain supported aliases for `source`):
 ```bash
-# List configured sources (tabular overview with package counts):
-appmgr repo list
+# List configured sources (tabular overview with instant package counts):
+appmgr source list
 
 # List configured sources in JSON format:
-appmgr repo list --json
+appmgr source list --json
 
-# Add a direct APT source:
-appmgr repo add apt my-repo https://example.com/debian --suite stable --components main --priority 600
+# Add a direct APT source (supports comma- or space-separated components):
+appmgr source add apt my-repo https://example.com/debian --suite stable --components main,contrib --priority 600
 
 # Temporarily disable or re-enable a source:
-appmgr repo disable apt-vscode
-appmgr repo enable apt-vscode
+appmgr source disable apt-vscode
+appmgr source enable apt-vscode
 
-# Remove a source and purge its cache:
-appmgr repo remove my-repo
-```
+# Remove a source and purge its index, metadata, and ETag cache:
+appmgr source remove my-repo
 
-### 3. Source Recipe & Maintainer Tools (`source`, `pkg`)
-Validate and test Schema v2 declarative source definition recipes:
-```bash
-# Lint a Schema v2 source definition:
+# Generate, lint, and dry-run test a Schema v2 source definition:
+appmgr source new my-source
 appmgr source lint sources/apt-gh.toml
-
-# Test network reachability and index parsing for a source definition:
-appmgr source test sources/apt-gh.toml
+appmgr source test sources/apt-gh.toml --dry-run
 ```
 
 ### 4. Searching Applications (`search`)
@@ -222,7 +216,7 @@ appmgr search vscode
 # Filter search results by source ID:
 appmgr search gh --source apt-gh
 
-# Filter search results by driver type (apt, appimagehub, aur, github, gitlab):
+# Filter search results by driver type (apt, appimagehub, aur, github):
 appmgr search obsidian --driver appimagehub
 appmgr search paru --driver aur
 
@@ -267,8 +261,28 @@ appmgr install spotify-client --auto-deps     # Auto-install host packages witho
 appmgr install discord --rootless-deps       # Force rootless sandbox dependency isolation
 appmgr install btop --no-deps               # Skip dependency checking
 
+# Enable isolated $HOME Bubblewrap sandbox at install time:
+appmgr install owner/repo --isolate
+
 # Non-interactive mode (assumes yes):
 appmgr install apt-gh:gh -y
+```
+
+### 6. Sandbox Isolation Profiles (`sandbox`)
+Configure per-application Bubblewrap sandboxing (`none`, `opt-only`, `isolated-home`, `offline`):
+```bash
+# View current sandbox configuration:
+appmgr sandbox obsidian
+
+# Isolate $HOME into ~/.local/share/appmgr/sandboxes/<id> and disable network:
+appmgr sandbox obsidian --profile isolated-home --no-net
+
+# Offline sandbox with a custom home directory:
+appmgr sandbox demo --profile offline --home-dir ~/Sandboxes/demo
+
+# Re-enable network or reset to package defaults:
+appmgr sandbox obsidian --allow-net
+appmgr sandbox obsidian --reset
 ```
 
 ### 6. Linking Applications to GitHub (`link`)
@@ -279,7 +293,7 @@ appmgr link obsidian obsidianmd/obsidian-releases
 appmgr link discord discord/discord-linux
 ```
 
-### 4. Updating AppMgr Itself (`self-update`)
+### 7. Updating AppMgr Itself (`self-update`)
 ```bash
 # Check if a new version of appmgr is available:
 appmgr self-update --check
@@ -288,7 +302,7 @@ appmgr self-update --check
 appmgr self-update -y
 ```
 
-### 5. Managing Environment Variables (`env`)
+### 8. Managing Environment Variables (`env`)
 ```bash
 # Set custom persistent environment variables:
 appmgr env obsidian ELECTRON_OZONE_PLATFORM_HINT=auto QT_QPA_PLATFORM=wayland
@@ -300,7 +314,7 @@ appmgr env obsidian --list
 appmgr env obsidian --unset QT_QPA_PLATFORM
 ```
 
-### 6. Persistent Launch Arguments (`args`)
+### 9. Persistent Launch Arguments (`args`)
 ```bash
 # Set permanent CLI flags passed to the binary on every start:
 appmgr args btop --utf-force --low-color
@@ -312,7 +326,7 @@ appmgr args btop --list
 appmgr args btop --clear
 ```
 
-### 7. Version Freezing (`pin` / `unpin`)
+### 10. Version Freezing (`pin` / `unpin`)
 ```bash
 # Freeze package version to skip during general upgrades:
 appmgr pin btop
@@ -327,10 +341,13 @@ appmgr upgrade btop --force
 appmgr unpin btop
 ```
 
-### 8. Checking & Upgrading Packages (`upgrade`)
+### 11. Checking & Upgrading Packages (`upgrade`)
 ```bash
 # Multi-threaded async check for updates without installing:
 appmgr upgrade --check
+
+# Check updates with compact release notes preview (prioritizing breaking changes):
+appmgr upgrade --notes
 
 # Machine-readable JSON output for status bars and scripts:
 appmgr upgrade --check --json
@@ -342,7 +359,7 @@ appmgr upgrade -y
 appmgr upgrade gh
 ```
 
-### 9. Rollback & Cache Cleanup (`rollback` / `clean`)
+### 12. Rollback & Cache Cleanup (`rollback` / `clean`)
 ```bash
 # Restore previous version from rollback backup:
 appmgr rollback btop
@@ -351,16 +368,21 @@ appmgr rollback btop
 appmgr clean -y
 ```
 
-### 10. Exporting & Importing Application Manifests (`export` / `import`)
+### 13. Declarative Sync Manifests (`export` / `import --diff`)
 ```bash
-# Export all installed applications and configurations:
+# Export active sources, packages, origins, tags, env, args, pins, and sandbox profiles:
 appmgr export my-apps.json
+# Or export as TOML:
+appmgr export my-apps.toml
 
-# Restore all applications on a fresh machine:
-appmgr import my-apps.json -y
+# Preview declarative change plan (+ source, + install, ~ update, = keep) without modifying state:
+appmgr import my-apps.json --diff
+
+# Apply the manifest plan (or restore on a fresh machine):
+appmgr import my-apps.json --apply -y
 ```
 
-### 11. Shared Library Diagnostics & Repair (`deps`)
+### 14. Shared Library Diagnostics & Repair (`deps`)
 ```bash
 # Check shared library dependencies of an installed application:
 appmgr deps spotify-client
@@ -375,7 +397,7 @@ appmgr deps spotify-client --fix
 appmgr deps --all --fix --auto-deps
 ```
 
-### 12. System Diagnostics & Inspection (`doctor` / `info` / `run`)
+### 15. System Diagnostics & Inspection (`doctor` / `info` / `run`)
 ```bash
 # Run comprehensive diagnostic checks (FUSE, bwrap, libraries, PATH):
 appmgr doctor
@@ -387,7 +409,7 @@ appmgr info btop
 appmgr run btop
 ```
 
-### 13. Removing Applications (`remove`)
+### 16. Removing Applications (`remove`)
 ```bash
 appmgr remove btop -y
 ```

@@ -1,4 +1,4 @@
-use crate::ui::{apt_prefix, c, Colors, PacmanBar};
+use crate::ui::{apt_prefix, c, truncate_chars, Colors, PacmanBar};
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, IF_NONE_MATCH, USER_AGENT};
 use reqwest::StatusCode;
@@ -32,6 +32,8 @@ pub struct Release {
     #[serde(default)]
     pub prerelease: bool,
     #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
     pub assets: Vec<ReleaseAsset>,
 }
 
@@ -63,12 +65,57 @@ impl GitHubClient {
     pub const API_BASE: &'static str = "https://api.github.com";
 
     pub fn new() -> Self {
-        let token = std::env::var("GITHUB_TOKEN").ok().filter(|s| !s.is_empty());
+        let token = std::env::var("GITHUB_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("GH_TOKEN").ok().filter(|s| !s.is_empty()));
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { token, client }
+    }
+
+    pub fn format_rate_limit_message(headers: &HeaderMap, status: StatusCode) -> String {
+        let remaining = headers
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("?");
+        let reset_info = headers
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok())
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .map(|dt| {
+                let local_str = dt.with_timezone(&chrono::Local).format("%H:%M:%S");
+                let now_ts = chrono::Utc::now().timestamp();
+                let diff = (dt.timestamp() - now_ts).max(0);
+                format!(", resets at {} (in {}s)", local_str, diff)
+            })
+            .unwrap_or_default();
+
+        format!(
+            "GitHub API rate limit exceeded (HTTP {}, X-RateLimit-Remaining: {}{}). Set GITHUB_TOKEN environment variable to raise limit to 5,000 req/hr.",
+            status, remaining, reset_info
+        )
+    }
+
+    fn check_error_response(headers: &HeaderMap, status: StatusCode) -> Option<String> {
+        if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+            let remaining = headers
+                .get("x-ratelimit-remaining")
+                .and_then(|v| v.to_str().ok());
+            if remaining == Some("0")
+                || status == StatusCode::TOO_MANY_REQUESTS
+                || status == StatusCode::FORBIDDEN
+            {
+                return Some(Self::format_rate_limit_message(headers, status));
+            }
+        }
+        if !status.is_success() {
+            return Some(format!("GitHub API error (HTTP {})", status));
+        }
+        None
     }
 
     fn headers(&self, etag: Option<&str>) -> HeaderMap {
@@ -116,11 +163,8 @@ impl GitHubClient {
             .map_err(|e| format!("Network error: {}", e))?;
 
         let status = resp.status();
-        if status == StatusCode::FORBIDDEN {
-            return Err("GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable to get 5,000 req/hr.".to_string());
-        }
-        if !status.is_success() {
-            return Err(format!("GitHub Search API error (HTTP {})", status));
+        if let Some(err) = Self::check_error_response(resp.headers(), status) {
+            return Err(err);
         }
 
         #[derive(Deserialize)]
@@ -146,7 +190,12 @@ impl GitHubClient {
         let clean_repo = repo.trim().trim_matches('/');
 
         if let Some(t) = tag {
-            let url = format!("{}/repos/{}/releases/tags/{}", Self::API_BASE, clean_repo, t.trim());
+            let url = format!(
+                "{}/repos/{}/releases/tags/{}",
+                Self::API_BASE,
+                clean_repo,
+                t.trim()
+            );
             let resp = self
                 .client
                 .get(&url)
@@ -157,13 +206,18 @@ impl GitHubClient {
 
             let status = resp.status();
             if status == StatusCode::NOT_MODIFIED {
-                return Ok((StatusCode::NOT_MODIFIED, None, etag.map(String::from), false));
+                return Ok((
+                    StatusCode::NOT_MODIFIED,
+                    None,
+                    etag.map(String::from),
+                    false,
+                ));
             }
             if status == StatusCode::NOT_FOUND {
                 return Ok((StatusCode::NOT_FOUND, None, None, false));
             }
-            if status == StatusCode::FORBIDDEN {
-                return Err("GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable.".to_string());
+            if let Some(err) = Self::check_error_response(resp.headers(), status) {
+                return Err(err);
             }
 
             let new_etag = resp
@@ -180,7 +234,11 @@ impl GitHubClient {
         }
 
         if include_pre {
-            let url = format!("{}/repos/{}/releases?per_page=10", Self::API_BASE, clean_repo);
+            let url = format!(
+                "{}/repos/{}/releases?per_page=10",
+                Self::API_BASE,
+                clean_repo
+            );
             let resp = self
                 .client
                 .get(&url)
@@ -191,10 +249,18 @@ impl GitHubClient {
 
             let status = resp.status();
             if status == StatusCode::NOT_MODIFIED {
-                return Ok((StatusCode::NOT_MODIFIED, None, etag.map(String::from), false));
+                return Ok((
+                    StatusCode::NOT_MODIFIED,
+                    None,
+                    etag.map(String::from),
+                    false,
+                ));
             }
             if status == StatusCode::NOT_FOUND {
                 return Ok((StatusCode::NOT_FOUND, None, None, false));
+            }
+            if let Some(err) = Self::check_error_response(resp.headers(), status) {
+                return Err(err);
             }
 
             let new_etag = resp
@@ -226,22 +292,42 @@ impl GitHubClient {
 
         let status = resp.status();
         if status == StatusCode::NOT_MODIFIED {
-            return Ok((StatusCode::NOT_MODIFIED, None, etag.map(String::from), false));
+            return Ok((
+                StatusCode::NOT_MODIFIED,
+                None,
+                etag.map(String::from),
+                false,
+            ));
         }
         if status == StatusCode::NOT_FOUND {
-            // Fallback: check if repo has only pre-releases
-            let fb_url = format!("{}/repos/{}/releases?per_page=5", Self::API_BASE, clean_repo);
-            if let Ok(fb_resp) = self.client.get(&fb_url).headers(self.headers(None)).send().await {
-                if let Ok(fb_list) = fb_resp.json::<Vec<Release>>().await {
-                    if let Some(first) = fb_list.into_iter().next() {
-                        return Ok((StatusCode::OK, Some(first), None, true));
-                    }
+            let fb_url = format!(
+                "{}/repos/{}/releases?per_page=5",
+                Self::API_BASE,
+                clean_repo
+            );
+            let fb_resp = self
+                .client
+                .get(&fb_url)
+                .headers(self.headers(None))
+                .send()
+                .await
+                .map_err(|e| format!("Network error: {}", e))?;
+            let fb_status = fb_resp.status();
+            if fb_status == StatusCode::NOT_FOUND {
+                return Ok((StatusCode::NOT_FOUND, None, None, false));
+            }
+            if let Some(err) = Self::check_error_response(fb_resp.headers(), fb_status) {
+                return Err(err);
+            }
+            if let Ok(fb_list) = fb_resp.json::<Vec<Release>>().await {
+                if let Some(first) = fb_list.into_iter().next() {
+                    return Ok((StatusCode::OK, Some(first), None, true));
                 }
             }
             return Ok((StatusCode::NOT_FOUND, None, None, false));
         }
-        if status == StatusCode::FORBIDDEN {
-            return Err("GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable.".to_string());
+        if let Some(err) = Self::check_error_response(resp.headers(), status) {
+            return Err(err);
         }
 
         let new_etag = resp
@@ -303,22 +389,99 @@ impl GitHubClient {
         let is_aarch64 = host_arch == "aarch64";
 
         let os_blacklist = [
-            ".msi", ".dmg", ".apk", ".rpm", ".pkg.tar.", "-src.", "_src.", "-source.", "_source.",
-            "-sources.", "_sources.", "src.tar", "source.tar", "sources.tar", "debug", "dbg",
-            "symbols", "dsym", "windows", "win32", "win64", "-win-", "_win_", "-win.", "_win.",
-            "darwin", "macos", "mac-", "mac_", ".sha256", ".sha256sum", ".sha512", ".sig",
-            ".asc", ".txt", ".md5", ".json", ".yaml", ".yml", ".sbom", ".pem", ".crt",
+            ".msi",
+            ".dmg",
+            ".apk",
+            ".rpm",
+            ".pkg.tar.",
+            "-src.",
+            "_src.",
+            "-source.",
+            "_source.",
+            "-sources.",
+            "_sources.",
+            "src.tar",
+            "source.tar",
+            "sources.tar",
+            "debug",
+            "dbg",
+            "symbols",
+            "dsym",
+            "windows",
+            "win32",
+            "win64",
+            "-win-",
+            "_win_",
+            "-win.",
+            "_win.",
+            "darwin",
+            "macos",
+            "mac-",
+            "mac_",
+            ".sha256",
+            ".sha256sum",
+            ".sha512",
+            ".sig",
+            ".asc",
+            ".txt",
+            ".md5",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".sbom",
+            ".pem",
+            ".crt",
         ];
 
         let x86_blacklist = [
-            "arm64", "aarch64", "armv", "armhf", "armel", "arm-", "arm_", "-arm.", "i386", "i486",
-            "i586", "i686", "x86-32", "x86_32", "s390", "s390x", "ppc", "powerpc", "riscv",
-            "mips", "m68k", "sparc", "alpha", "sh4", "loongarch", "wasm",
+            "arm64",
+            "aarch64",
+            "armv",
+            "armhf",
+            "armel",
+            "arm-",
+            "arm_",
+            "-arm.",
+            "i386",
+            "i486",
+            "i586",
+            "i686",
+            "x86-32",
+            "x86_32",
+            "s390",
+            "s390x",
+            "ppc",
+            "powerpc",
+            "riscv",
+            "mips",
+            "m68k",
+            "sparc",
+            "alpha",
+            "sh4",
+            "loongarch",
+            "wasm",
         ];
 
         let arm_blacklist = [
-            "x86_64", "amd64", "x64", "x86-64", "i386", "i486", "i586", "i686", "s390", "s390x",
-            "ppc", "powerpc", "riscv", "mips", "m68k", "sparc", "alpha", "sh4", "loongarch",
+            "x86_64",
+            "amd64",
+            "x64",
+            "x86-64",
+            "i386",
+            "i486",
+            "i586",
+            "i686",
+            "s390",
+            "s390x",
+            "ppc",
+            "powerpc",
+            "riscv",
+            "mips",
+            "m68k",
+            "sparc",
+            "alpha",
+            "sh4",
+            "loongarch",
             "wasm",
         ];
 
@@ -356,7 +519,10 @@ impl GitHubClient {
             let mut is_bin = false;
             if !is_deb && !is_appimage && !is_tar && !is_zip && !lower.ends_with(".exe") {
                 if is_x86_64 {
-                    if ["linux", "amd64", "x86_64", "x64"].iter().any(|t| lower.contains(t)) {
+                    if ["linux", "amd64", "x86_64", "x64"]
+                        .iter()
+                        .any(|t| lower.contains(t))
+                    {
                         is_bin = true;
                     } else if let Some(hint) = app_name_hint {
                         if lower == hint.to_lowercase() {
@@ -364,7 +530,10 @@ impl GitHubClient {
                         }
                     }
                 } else if is_aarch64 {
-                    if ["linux", "aarch64", "arm64"].iter().any(|t| lower.contains(t)) {
+                    if ["linux", "aarch64", "arm64"]
+                        .iter()
+                        .any(|t| lower.contains(t))
+                    {
                         is_bin = true;
                     } else if let Some(hint) = app_name_hint {
                         if lower == hint.to_lowercase() {
@@ -382,30 +551,103 @@ impl GitHubClient {
 
             let mut format_score = match prefer {
                 Some("deb") => {
-                    if is_deb { 50 } else if is_appimage { 20 } else if is_tar { 15 } else if is_zip { 10 } else { 5 }
+                    if is_deb {
+                        50
+                    } else if is_appimage {
+                        20
+                    } else if is_tar {
+                        15
+                    } else if is_zip {
+                        10
+                    } else {
+                        5
+                    }
                 }
                 Some("appimage") => {
-                    if is_appimage { 50 } else if is_deb { 20 } else if is_tar { 15 } else if is_zip { 10 } else { 5 }
+                    if is_appimage {
+                        50
+                    } else if is_deb {
+                        20
+                    } else if is_tar {
+                        15
+                    } else if is_zip {
+                        10
+                    } else {
+                        5
+                    }
                 }
                 Some("tar") => {
-                    if is_tar { 50 } else if is_appimage { 20 } else if is_deb { 15 } else if is_zip { 10 } else { 5 }
+                    if is_tar {
+                        50
+                    } else if is_appimage {
+                        20
+                    } else if is_deb {
+                        15
+                    } else if is_zip {
+                        10
+                    } else {
+                        5
+                    }
                 }
                 Some("zip") => {
-                    if is_zip { 50 } else if is_appimage { 20 } else if is_deb { 15 } else if is_tar { 10 } else { 5 }
+                    if is_zip {
+                        50
+                    } else if is_appimage {
+                        20
+                    } else if is_deb {
+                        15
+                    } else if is_tar {
+                        10
+                    } else {
+                        5
+                    }
                 }
                 Some("bin") => {
-                    if is_bin { 50 } else if is_appimage { 20 } else if is_deb { 15 } else if is_tar { 10 } else { 5 }
+                    if is_bin {
+                        50
+                    } else if is_appimage {
+                        20
+                    } else if is_deb {
+                        15
+                    } else if is_tar {
+                        10
+                    } else {
+                        5
+                    }
                 }
                 _ => {
-                    // Default priority: .AppImage -> .deb -> .tar.* -> .zip -> raw binary
-                    if is_appimage { 30 } else if is_deb { 20 } else if is_tar { 10 } else if is_zip { 5 } else { 1 }
+                    if is_appimage {
+                        30
+                    } else if is_deb {
+                        20
+                    } else if is_tar {
+                        10
+                    } else if is_zip {
+                        5
+                    } else {
+                        1
+                    }
                 }
             };
 
             let arch_score = if is_x86_64 {
-                if ["x86_64", "amd64", "x86-64", "linux64", "x64"].iter().any(|t| lower.contains(t)) { 40 } else { 0 }
+                if ["x86_64", "amd64", "x86-64", "linux64", "x64"]
+                    .iter()
+                    .any(|t| lower.contains(t))
+                {
+                    40
+                } else {
+                    0
+                }
             } else if is_aarch64 {
-                if ["aarch64", "arm64", "armv8"].iter().any(|t| lower.contains(t)) { 40 } else { 0 }
+                if ["aarch64", "arm64", "armv8"]
+                    .iter()
+                    .any(|t| lower.contains(t))
+                {
+                    40
+                } else {
+                    0
+                }
             } else {
                 0
             };
@@ -449,10 +691,7 @@ impl GitHubClient {
             .map(|r| r.replace_all(asset_name, ".*").to_string())
             .unwrap_or_else(|_| asset_name.to_string());
 
-        let parts: Vec<String> = replaced
-            .split(".*")
-            .map(regex::escape)
-            .collect();
+        let parts: Vec<String> = replaced.split(".*").map(regex::escape).collect();
         format!("^{}$", parts.join(".*"))
     }
 
@@ -488,13 +727,12 @@ impl GitHubClient {
 
         let total_bytes = resp.content_length().unwrap_or(expected_size);
         let mut bar = PacmanBar::new(
-            100,
-            &format!("Downloading {}", &asset_name[..asset_name.len().min(20)]),
-            "%",
+            total_bytes,
+            &format!("Downloading {}", truncate_chars(asset_name, 20)),
         );
 
-        let mut file = File::create(&temp_dest)
-            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        let mut file =
+            File::create(&temp_dest).map_err(|e| format!("Failed to create temp file: {}", e))?;
         let mut downloaded: u64 = 0;
         let mut hasher = Sha256::new();
         let mut stream = resp.bytes_stream();
@@ -506,18 +744,9 @@ impl GitHubClient {
                 .map_err(|e| format!("Error writing chunk: {}", e))?;
             hasher.update(&chunk);
             downloaded += chunk.len() as u64;
-
-            if total_bytes > 0 {
-                let percent = ((downloaded as f64 / total_bytes as f64) * 100.0) as usize;
-                let mb_done = (downloaded as f64) / (1024.0 * 1024.0);
-                let mb_total = (total_bytes as f64) / (1024.0 * 1024.0);
-                bar.update(percent, &format!("{:.1}/{:.1} MB", mb_done, mb_total));
-            } else {
-                let mb_done = (downloaded as f64) / (1024.0 * 1024.0);
-                bar.update(50, &format!("{:.1} MB", mb_done));
-            }
+            bar.update(downloaded);
         }
-        bar.finish(&format!("Downloaded {}", asset_name));
+        bar.finish(&format!("Downloaded {}", truncate_chars(asset_name, 24)));
 
         let computed_sha256 = hex::encode(hasher.finalize()).to_lowercase();
 
@@ -526,10 +755,7 @@ impl GitHubClient {
                 println!(
                     " {} SHA-256 verified ({})",
                     apt_prefix("OK"),
-                    c(
-                        &format!("{}...", &computed_sha256[..12]),
-                        &[Colors::BOLD, Colors::BRIGHT_GREEN]
-                    )
+                    c(&format!("{}...", &computed_sha256[..12]), &[Colors::DIM])
                 );
             } else {
                 let _ = std::fs::remove_file(&temp_dest);
@@ -538,13 +764,10 @@ impl GitHubClient {
                     apt_prefix("FAIL"),
                     asset_name
                 );
-                println!(
-                    "        Expected: {}",
-                    c(&expected, &[Colors::BOLD, Colors::BRIGHT_RED])
-                );
+                println!("        Expected: {}", c(&expected, &[Colors::RED]));
                 println!(
                     "        Computed: {}",
-                    c(&computed_sha256, &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+                    c(&computed_sha256, &[Colors::YELLOW])
                 );
                 return Err(format!("SHA-256 checksum mismatch for {}", asset_name));
             }
@@ -588,12 +811,23 @@ impl GitHubClient {
 
         if target_asset.is_none() {
             let manifest_patterns = [
-                "sha256sums.txt", "sha256sums", "sha256sum.txt", "sha256sum", "sha256.txt",
-                "sha256", "checksums.txt", "checksums_sha256.txt", "checksums", "checksums.sha256",
+                "sha256sums.txt",
+                "sha256sums",
+                "sha256sum.txt",
+                "sha256sum",
+                "sha256.txt",
+                "sha256",
+                "checksums.txt",
+                "checksums_sha256.txt",
+                "checksums",
+                "checksums.sha256",
             ];
             for cand in r_assets {
                 let c_name = cand.name.to_lowercase();
-                if manifest_patterns.iter().any(|pat| c_name == *pat || c_name.ends_with(pat)) {
+                if manifest_patterns
+                    .iter()
+                    .any(|pat| c_name == *pat || c_name.ends_with(pat))
+                {
                     target_asset = Some(cand);
                     break;
                 }
@@ -604,7 +838,9 @@ impl GitHubClient {
             for cand in r_assets {
                 let c_name = cand.name.to_lowercase();
                 if (c_name.contains("sha256") || c_name.contains("checksum"))
-                    && [".txt", ".sha256", ".sha256sum", ".sum", ".sums", ""].iter().any(|ext| c_name.ends_with(ext))
+                    && [".txt", ".sha256", ".sha256sum", ".sum", ".sums", ""]
+                        .iter()
+                        .any(|ext| c_name.ends_with(ext))
                 {
                     target_asset = Some(cand);
                     break;
@@ -758,8 +994,14 @@ mod tests {
         let pat = GitHubClient::derive_pattern("btop-x86_64-linux-musl.tar.gz", "v1.4.8");
         assert_eq!(pat, "^btop\\-x86_64\\-linux\\-musl\\.tar\\.gz$");
 
-        let pat2 = GitHubClient::derive_pattern("ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz", "14.1.0");
-        assert_eq!(pat2, "^ripgrep\\-.*\\-x86_64\\-unknown\\-linux\\-musl\\.tar\\.gz$");
+        let pat2 = GitHubClient::derive_pattern(
+            "ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz",
+            "14.1.0",
+        );
+        assert_eq!(
+            pat2,
+            "^ripgrep\\-.*\\-x86_64\\-unknown\\-linux\\-musl\\.tar\\.gz$"
+        );
     }
 
     #[test]
@@ -786,13 +1028,22 @@ mod tests {
             },
         ];
 
-        // Default: AppImage > deb > tar
         let filtered = client.filter_assets(&assets, None, None, None);
         assert!(!filtered.is_empty());
         assert_eq!(filtered[0].format, "appimage");
 
-        // Prefer deb: deb > AppImage
         let prefer_deb = client.filter_assets(&assets, Some("deb"), None, None);
         assert_eq!(prefer_deb[0].format, "deb");
+    }
+
+    #[test]
+    fn test_rate_limit_formatting_and_403_check() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+        headers.insert("x-ratelimit-reset", HeaderValue::from_static("1800000000"));
+        let msg = GitHubClient::check_error_response(&headers, StatusCode::FORBIDDEN).unwrap();
+        assert!(msg.contains("X-RateLimit-Remaining: 0"));
+        assert!(msg.contains("resets at"));
+        assert!(msg.contains("GITHUB_TOKEN"));
     }
 }

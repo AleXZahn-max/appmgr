@@ -1,11 +1,128 @@
 use crate::config::Config;
 use crate::db::PackageRecord;
+use crate::desktop::{
+    create_desktop_entry, inspect_elf_headers, install_best_icon, install_patched_desktop_file,
+    is_gui_binary,
+};
+use crate::formats::StagingDirGuard;
+use crate::launcher::write_package_launchers;
+use crate::ui::apt_prefix;
 use regex::Regex;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub fn has_fuse2_runtime() -> bool {
+    let has_fusermount = which::which("fusermount").is_ok() || which::which("fusermount3").is_ok();
+    if !has_fusermount {
+        return false;
+    }
+
+    if let Ok(output) = Command::new("ldconfig").arg("-p").output() {
+        if String::from_utf8_lossy(&output.stdout).contains("libfuse.so.2") {
+            return true;
+        }
+    }
+
+    let std_paths = [
+        "/lib/libfuse.so.2",
+        "/lib64/libfuse.so.2",
+        "/usr/lib/libfuse.so.2",
+        "/usr/lib64/libfuse.so.2",
+        "/usr/lib/x86_64-linux-gnu/libfuse.so.2",
+        "/usr/lib/aarch64-linux-gnu/libfuse.so.2",
+    ];
+    std_paths.iter().any(|p| Path::new(p).exists())
+}
+
+fn is_valid_squashfs_superblock(buf: &[u8]) -> bool {
+    if buf.len() < 32 || &buf[..4] != b"hsqs" {
+        return false;
+    }
+    let block_size = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let s_major = u16::from_le_bytes([buf[28], buf[29]]);
+    let s_minor = u16::from_le_bytes([buf[30], buf[31]]);
+    s_major == 4
+        && s_minor == 0
+        && (4096..=1048576).contains(&block_size)
+        && block_size.is_power_of_two()
+}
+
+pub fn find_squashfs_offset(path: &Path) -> Option<u64> {
+    let mut file = File::open(path).ok()?;
+    let mut first = [0u8; 32];
+    if file.read_exact(&mut first).is_ok() && is_valid_squashfs_superblock(&first) {
+        return Some(0);
+    }
+
+    if let Some(hdr) = inspect_elf_headers(path) {
+        if hdr.e_shoff > 0 && hdr.e_shentsize > 0 && hdr.e_shnum > 0 {
+            let elf_end = hdr
+                .e_shoff
+                .saturating_add((hdr.e_shnum as u64).saturating_mul(hdr.e_shentsize as u64));
+            if file.seek(SeekFrom::Start(elf_end)).is_ok() {
+                let mut probe = [0u8; 32];
+                if file.read_exact(&mut probe).is_ok() && is_valid_squashfs_superblock(&probe) {
+                    return Some(elf_end);
+                }
+            }
+        }
+    }
+
+    // Bounded scan across the first 8 MiB for embedded SquashFS superblock
+    const MAX_SCAN: usize = 8 * 1024 * 1024;
+    const CHUNK: usize = 64 * 1024;
+    let _ = file.seek(SeekFrom::Start(0));
+    let mut buf = vec![0u8; CHUNK + 32];
+    let mut scanned = 0usize;
+    let mut overlap = 0usize;
+
+    while scanned < MAX_SCAN {
+        let n = file.read(&mut buf[overlap..]).ok()?;
+        if n == 0 {
+            break;
+        }
+        let valid_len = overlap + n;
+        for i in 0..valid_len.saturating_sub(31) {
+            if &buf[i..i + 4] == b"hsqs" && is_valid_squashfs_superblock(&buf[i..i + 32]) {
+                return Some((scanned.saturating_sub(overlap) + i) as u64);
+            }
+        }
+        if valid_len >= 31 {
+            buf.copy_within(valid_len - 31..valid_len, 0);
+            overlap = 31;
+        } else {
+            overlap = 0;
+        }
+        scanned += n;
+    }
+
+    None
+}
+
+pub fn has_valid_appimage_signature(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 32 * 1024];
+    let n = file.read(&mut head).unwrap_or(0);
+    if n < 4 {
+        return false;
+    }
+    if &head[..4] == b"hsqs" {
+        return true;
+    }
+    if &head[..4] != b"\x7fELF" {
+        return false;
+    }
+    if find_squashfs_offset(path).is_some() {
+        return true;
+    }
+    head[..n].windows(3).any(|w| w == b"AI\x02" || w == b"App")
+}
 
 pub struct AppImagePackage {
     pub file_path: PathBuf,
@@ -78,125 +195,74 @@ impl AppImagePackage {
         args: Option<Vec<String>>,
     ) -> Result<PackageRecord, String> {
         let (pkg_id, version, desc, file_size) = self.read_metadata()?;
-        let app_dir = self.config.apps_dir.join(&pkg_id);
-
-        if app_dir.exists() {
-            if force {
-                let _ = fs::remove_dir_all(&app_dir);
-            } else {
-                return Err(format!(
-                    "Package directory already exists: {}. Use -f to overwrite.",
-                    app_dir.display()
-                ));
-            }
+        if file_size == 0 {
+            return Err("Invalid AppImage file: file is empty".to_string());
         }
-        fs::create_dir_all(&app_dir)
-            .map_err(|e| format!("Failed to create app directory: {}", e))?;
 
-        let target_appimage = app_dir.join(format!("{}.AppImage", pkg_id));
-        fs::copy(&self.file_path, &target_appimage)
+        let app_dir = self.config.apps_dir.join(&pkg_id);
+        if app_dir.exists() && !force {
+            return Err(format!(
+                "Package directory already exists: {}. Use -f to overwrite.",
+                app_dir.display()
+            ));
+        }
+
+        // Stage on the same filesystem
+        let mut staging = StagingDirGuard::new(&self.config.apps_dir, &pkg_id)?;
+        let stage_path = staging.path.clone();
+
+        let staged_appimage = stage_path.join(format!("{}.AppImage", pkg_id));
+        fs::copy(&self.file_path, &staged_appimage)
             .map_err(|e| format!("Failed to copy AppImage: {}", e))?;
-        fs::set_permissions(&target_appimage, fs::Permissions::from_mode(0o755))
+        fs::set_permissions(&staged_appimage, fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("Failed to set permissions: {}", e))?;
 
-        // Extract resources (icon and .desktop) using --appimage-extract
-        let (icon_installed, desktop_installed) =
-            self.extract_resources(&target_appimage, &app_dir, &pkg_id);
+        let extracted_tmp = tempfile::tempdir().ok();
+        let squashfs_root = extracted_tmp
+            .as_ref()
+            .and_then(|d| Self::extract_squashfs_root(&staged_appimage, d.path()));
+
+        let orig_desktop_path = squashfs_root
+            .as_deref()
+            .and_then(Self::find_desktop_in_root);
+        let is_gui = orig_desktop_path.is_some()
+            || squashfs_root
+                .as_deref()
+                .map(Self::detect_gui_in_extracted)
+                .unwrap_or(false);
+
+        if !has_fuse2_runtime() {
+            println!(
+                " {} libfuse.so.2 not found; wrapper will fall back to --appimage-extract-and-run (install fuse2 for native mounting).",
+                apt_prefix("WARN")
+            );
+        }
+
+        // Atomic swap into final app_dir
+        staging.commit_swap(&stage_path, &app_dir, force)?;
 
         let launcher_path = self.config.bin_dir.join(&pkg_id);
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
-
-        let mut env_lines = Vec::new();
-        for (k, v) in &env_map {
-            env_lines.push(format!("export {}=\"{}\"", k, v));
-        }
-        let env_block = if env_lines.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}", env_lines.join("\n"))
-        };
-
-        let args_block = if args_vec.is_empty() {
-            "\nPERSISTENT_ARGS=()\n".to_string()
-        } else {
-            let quoted: Vec<String> = args_vec.iter().map(|a| format!("    \"{}\"", a)).collect();
-            format!("\nPERSISTENT_ARGS=(\n{}\n)\n", quoted.join("\n"))
-        };
-
-        let script = format!(
-            r#"#!/usr/bin/env bash
-# Wrapper created by appmgr for {pkg_id} (AppImage)
-APPIMAGE="{target_appimage}"{env_block}
-{args_block}
-if [ -z "$APPIMAGE_EXTRACT_AND_RUN" ]; then
-    if ! command -v fusermount &>/dev/null && ! command -v fusermount3 &>/dev/null; then
-        export APPIMAGE_EXTRACT_AND_RUN=1
-    fi
-fi
-
-exec "$APPIMAGE" "${{PERSISTENT_ARGS[@]}}" "$@"
-"#,
-            pkg_id = pkg_id,
-            target_appimage = target_appimage.display(),
-            env_block = env_block,
-            args_block = args_block,
-        );
-
-        if let Some(parent) = launcher_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        fs::write(&launcher_path, script)
-            .map_err(|e| format!("Failed to write launcher: {}", e))?;
-        fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to chmod launcher: {}", e))?;
-
-        let mut desktop_files = Vec::new();
-        if let Some(dt) = desktop_installed {
-            desktop_files.push(dt);
-        } else {
-            let fallback_dt = self
-                .config
-                .applications_dir
-                .join(format!("appmgr-{}.desktop", pkg_id));
-            let content = format!(
-                r#"[Desktop Entry]
-Name={}
-Comment={}
-Exec="{}" %U
-Terminal=false
-Type=Application
-Icon=application-x-executable
-Categories=Utility;Application;
-"#,
-                pkg_id.replace('-', " "),
-                desc,
-                launcher_path.display()
-            );
-            if fs::write(&fallback_dt, content).is_ok() {
-                desktop_files.push(fallback_dt);
-            }
-        }
-
-        let icons = icon_installed.into_iter().collect();
         let now = chrono::Local::now().to_rfc3339();
 
-        Ok(PackageRecord {
+        let mut record = PackageRecord {
             id: pkg_id.clone(),
-            name: pkg_id,
+            name: pkg_id.clone(),
             version,
             format: "appimage".to_string(),
             mode: self.config.mode.clone(),
             install_date: now,
             install_dir: app_dir,
             source_file: Some(self.file_path.to_string_lossy().to_string()),
-            binaries: vec![launcher_path],
-            desktop_files,
-            icons,
+            entrypoint: Some(PathBuf::from(format!("{}.AppImage", pkg_id))),
+            binaries: vec![launcher_path.clone()],
+            desktop_files: Vec::new(),
+            icons: Vec::new(),
             installed_files_count: Some(1),
             total_size_bytes: Some(file_size),
-            is_gui: Some(true),
-            description: Some(desc),
+            is_gui: Some(is_gui),
+            description: Some(desc.clone()),
             repo: self.repo.clone(),
             tag: self.tag.clone(),
             etag: None,
@@ -205,93 +271,137 @@ Categories=Utility;Application;
             args: args_vec,
             pinned: false,
             ..Default::default()
-        })
+        };
+
+        write_package_launchers(&record, &self.config.bin_dir)?;
+
+        let icon_installed = squashfs_root
+            .as_deref()
+            .and_then(|root| install_best_icon(&[root], &self.config.icons_dir, &pkg_id));
+
+        if let Some(dt_path) = orig_desktop_path {
+            let dest_dt = self
+                .config
+                .applications_dir
+                .join(format!("appmgr-{}.desktop", pkg_id));
+            if let Ok(installed_dt) =
+                install_patched_desktop_file(&dt_path, &dest_dt, &launcher_path, Some(&pkg_id))
+            {
+                record.desktop_files.push(installed_dt);
+            }
+        } else if is_gui {
+            let fallback_dt = self
+                .config
+                .applications_dir
+                .join(format!("appmgr-{}.desktop", pkg_id));
+            let icon_name = icon_installed.as_ref().map(|_| pkg_id.as_str());
+            if create_desktop_entry(
+                &fallback_dt,
+                &pkg_id.replace('-', " "),
+                &desc,
+                &launcher_path,
+                icon_name,
+                "Utility;Application;",
+            )
+            .is_ok()
+            {
+                record.desktop_files.push(fallback_dt);
+            }
+        }
+
+        record.icons = icon_installed.into_iter().collect();
+        Ok(record)
     }
 
-    fn extract_resources(
-        &self,
-        appimage_path: &Path,
-        _app_dir: &Path,
-        pkg_id: &str,
-    ) -> (Option<PathBuf>, Option<PathBuf>) {
-        let temp_dir = match tempfile::tempdir() { Ok(d) => d, Err(_) => return (None, None) };
+    fn extract_squashfs_root(appimage_path: &Path, work_dir: &Path) -> Option<PathBuf> {
+        let squashfs_root = work_dir.join("squashfs-root");
+
+        // 1. Prefer unsquashfs to extract resources without executing untrusted binaries
+        if which::which("unsquashfs").is_ok() {
+            if let Some(offset) = find_squashfs_offset(appimage_path) {
+                let status = Command::new("unsquashfs")
+                    .args([
+                        "-f",
+                        "-o",
+                        &offset.to_string(),
+                        "-d",
+                        &squashfs_root.to_string_lossy(),
+                        &appimage_path.to_string_lossy(),
+                    ])
+                    .env_clear()
+                    .env("PATH", "/usr/bin:/bin")
+                    .output();
+                if status.map(|o| o.status.success()).unwrap_or(false) && squashfs_root.exists() {
+                    return Some(squashfs_root);
+                }
+            }
+        }
+
+        // 2. Fallback to --appimage-extract only after verifying ELF/SquashFS header,
+        //    running with env_clear() and minimal environment
+        if !has_valid_appimage_signature(appimage_path) {
+            return None;
+        }
+
         let output = Command::new(appimage_path)
             .arg("--appimage-extract")
-            .current_dir(temp_dir.path())
+            .current_dir(work_dir)
+            .env_clear()
             .env("APPIMAGE_EXTRACT_AND_RUN", "1")
-            .output();
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", work_dir)
+            .env("TMPDIR", work_dir)
+            .output()
+            .ok()?;
 
-        if output.is_err() {
-            return (None, None);
+        if output.status.success() && squashfs_root.exists() {
+            Some(squashfs_root)
+        } else {
+            None
         }
+    }
 
-        let squashfs_root = temp_dir.path().join("squashfs-root");
-        if !squashfs_root.exists() {
-            return (None, None);
-        }
-
-        // Find .desktop file
-        let mut found_desktop = None;
-        if let Ok(entries) = fs::read_dir(&squashfs_root) {
+    fn find_desktop_in_root(squashfs_root: &Path) -> Option<PathBuf> {
+        if let Ok(entries) = fs::read_dir(squashfs_root) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_file()
-                    && p.extension().map(|e| e == "desktop").unwrap_or(false)
-                {
-                    found_desktop = Some(p);
-                    break;
+                if p.is_file() && p.extension().map(|e| e == "desktop").unwrap_or(false) {
+                    return Some(p);
                 }
             }
         }
-
-        // Patch and install desktop file
-        let mut installed_desktop = None;
-        if let Some(dt_path) = found_desktop {
-            if let Ok(content) = fs::read_to_string(&dt_path) {
-                let launcher = self.config.bin_dir.join(pkg_id);
-                let mut new_lines = Vec::new();
-                for line in content.lines() {
-                    if line.starts_with("Exec=") {
-                        new_lines.push(format!("Exec=\"{}\" %U", launcher.display()));
-                    } else if line.starts_with("Icon=") {
-                        new_lines.push(format!("Icon={}", pkg_id));
-                    } else {
-                        new_lines.push(line.to_string());
-                    }
-                }
-                let dest_dt = self
-                    .config
-                    .applications_dir
-                    .join(format!("appmgr-{}.desktop", pkg_id));
-                if let Some(parent) = dest_dt.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                if fs::write(&dest_dt, new_lines.join("\n") + "\n").is_ok() {
-                    installed_desktop = Some(dest_dt);
-                }
-            }
-        }
-
-        // Find and install icon
-        let mut installed_icon = None;
-        let icon_extensions = [".png", ".svg"];
-        if let Ok(entries) = fs::read_dir(&squashfs_root) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                let name = p.file_name().unwrap_or_default().to_string_lossy();
-                if icon_extensions.iter().any(|ext| name.ends_with(ext)) && !name.contains(".DirIcon") {
-                    let ext = p.extension().unwrap_or_default().to_string_lossy();
-                    let dest_icon_dir = self.config.icons_dir.join("hicolor/256x256/apps");
-                    let _ = fs::create_dir_all(&dest_icon_dir);
-                    let dest_icon = dest_icon_dir.join(format!("{}.{}", pkg_id, ext));
-                    if fs::copy(&p, &dest_icon).is_ok() {
-                        installed_icon = Some(dest_icon);
-                        break;
+        let apps_dir = squashfs_root.join("usr/share/applications");
+        if apps_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&apps_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() && p.extension().map(|e| e == "desktop").unwrap_or(false) {
+                        return Some(p);
                     }
                 }
             }
         }
+        None
+    }
 
-        (installed_icon, installed_desktop)
+    fn detect_gui_in_extracted(squashfs_root: &Path) -> bool {
+        let apprun = squashfs_root.join("AppRun");
+        if apprun.is_file() && is_gui_binary(&apprun) {
+            return true;
+        }
+        for sub in ["usr/bin", "bin"] {
+            let dir = squashfs_root.join(sub);
+            if dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_file() && is_gui_binary(&p) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 }

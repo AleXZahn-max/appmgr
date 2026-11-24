@@ -1,11 +1,13 @@
 use crate::config::Config;
 use crate::db::PackageRecord;
-use crate::desktop::create_desktop_entry;
-use crate::sandbox::generate_deb_smart_launcher;
-use regex::Regex;
-use std::collections::HashMap;
+use crate::desktop::{
+    create_desktop_entry, install_best_icon, install_patched_desktop_file, is_gui_binary,
+};
+use crate::formats::{connect_package_binaries, is_deb_arch_compatible, StagingDirGuard};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub struct DebPackage {
@@ -50,8 +52,7 @@ impl DebPackage {
 
         let file = File::open(&self.file_path)
             .map_err(|e| format!("Failed to open deb {}: {}", self.file_path.display(), e))?;
-        let mut archive =
-            ar::Archive::new(file);
+        let mut archive = ar::Archive::new(file);
 
         let mut control_tar_data = Vec::new();
         let mut control_tar_name = String::new();
@@ -116,8 +117,8 @@ impl DebPackage {
             let decoder = flate2::read::GzDecoder::new(cursor);
             Self::find_control_in_tar(decoder)
         } else if name.ends_with(".zst") {
-            let decoder = zstd::Decoder::new(cursor)
-                .map_err(|e| format!("zstd init error: {}", e))?;
+            let decoder =
+                zstd::Decoder::new(cursor).map_err(|e| format!("zstd init error: {}", e))?;
             Self::find_control_in_tar(decoder)
         } else {
             Self::find_control_in_tar(cursor)
@@ -144,31 +145,43 @@ impl DebPackage {
         Err("control file not found in control.tar".to_string())
     }
 
+    #[allow(dead_code)]
     pub fn install(
         &self,
         force: bool,
         env: Option<HashMap<String, String>>,
         args: Option<Vec<String>>,
     ) -> Result<PackageRecord, String> {
-        let (pkg_id, version, desc, file_size, _) = self.read_metadata()?;
-        let app_dir = self.config.apps_dir.join(&pkg_id);
+        self.install_with_owned(force, env, args, &[])
+    }
 
-        if app_dir.exists() {
-            if force {
-                let _ = fs::remove_dir_all(&app_dir);
-            } else {
-                return Err(format!(
-                    "Package directory already exists: {}. Use -f to overwrite.",
-                    app_dir.display()
-                ));
-            }
+    pub fn install_with_owned(
+        &self,
+        force: bool,
+        env: Option<HashMap<String, String>>,
+        args: Option<Vec<String>>,
+        owned_launchers: &[PathBuf],
+    ) -> Result<PackageRecord, String> {
+        let (pkg_id, version, desc, file_size, arch) = self.read_metadata()?;
+
+        if !is_deb_arch_compatible(&arch, std::env::consts::ARCH) {
+            return Err(format!(
+                "Incompatible .deb architecture '{}' for host '{}'",
+                arch,
+                std::env::consts::ARCH
+            ));
         }
-        fs::create_dir_all(&app_dir)
-            .map_err(|e| format!("Failed to create destination dir: {}", e))?;
 
-        // Extract data.tar.*
-        let file = File::open(&self.file_path)
-            .map_err(|e| format!("Failed to open deb: {}", e))?;
+        let app_dir = self.config.apps_dir.join(&pkg_id);
+        if app_dir.exists() && !force {
+            return Err(format!(
+                "Package directory already exists: {}. Use -f to overwrite.",
+                app_dir.display()
+            ));
+        }
+
+        // Read data.tar.* before touching apps_dir
+        let file = File::open(&self.file_path).map_err(|e| format!("Failed to open deb: {}", e))?;
         let mut archive = ar::Archive::new(file);
 
         let mut data_tar_name = String::new();
@@ -190,60 +203,86 @@ impl DebPackage {
             return Err("Invalid deb package: data.tar not found".to_string());
         }
 
+        // Stage extraction on the same filesystem
+        let mut staging = StagingDirGuard::new(&self.config.apps_dir, &pkg_id)?;
+        let stage_path = staging.path.clone();
+
         let cursor = std::io::Cursor::new(data_tar_data);
         if data_tar_name.ends_with(".xz") {
             let decoder = xz2::read::XzDecoder::new(cursor);
-            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &app_dir)?;
+            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &stage_path)?;
         } else if data_tar_name.ends_with(".gz") {
             let decoder = flate2::read::GzDecoder::new(cursor);
-            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &app_dir)?;
+            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &stage_path)?;
         } else if data_tar_name.ends_with(".zst") {
-            let decoder = zstd::Decoder::new(cursor)
-                .map_err(|e| format!("zstd error: {}", e))?;
-            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &app_dir)?;
+            let decoder = zstd::Decoder::new(cursor).map_err(|e| format!("zstd error: {}", e))?;
+            crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &stage_path)?;
         } else {
-            crate::formats::archive::ArchivePackage::extract_tar_safe(cursor, &app_dir)?;
+            crate::formats::archive::ArchivePackage::extract_tar_safe(cursor, &stage_path)?;
         }
 
-        // Find primary executable
-        let primary_exe = Self::discover_primary_exe(&app_dir, &pkg_id)?;
+        // Validate executables and metadata BEFORE swapping
+        let (primary_exe, secondary_exes) = Self::discover_executables(&stage_path, &pkg_id)?;
+        let rel_primary = primary_exe
+            .strip_prefix(&stage_path)
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_path_buf();
+
+        let mut secondary_rels = Vec::new();
+        for sec in &secondary_exes {
+            if let Ok(rel) = sec.strip_prefix(&stage_path) {
+                secondary_rels.push(rel.to_path_buf());
+            }
+        }
+
+        let has_opt = stage_path.join("opt").exists();
+        let bind_opt = if has_opt {
+            let mut opts = Vec::new();
+            if let Ok(entries) = fs::read_dir(stage_path.join("opt")) {
+                for entry in entries.flatten() {
+                    opts.push(format!("opt/{}", entry.file_name().to_string_lossy()));
+                }
+            }
+            opts.sort();
+            if opts.is_empty() {
+                None
+            } else {
+                Some(opts)
+            }
+        } else {
+            None
+        };
+
+        let orig_desktop_rel = Self::find_desktop_file(&stage_path)
+            .and_then(|p| p.strip_prefix(&stage_path).ok().map(|r| r.to_path_buf()));
+        let binary_is_gui = is_gui_binary(&primary_exe);
+        let is_gui = orig_desktop_rel.is_some() || binary_is_gui;
+
+        // Atomic swap into final app_dir
+        staging.commit_swap(&stage_path, &app_dir, force)?;
 
         let launcher_path = self.config.bin_dir.join(&pkg_id);
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
-
-        // Generate bwrap launcher
-        generate_deb_smart_launcher(
-            &app_dir,
-            &primary_exe,
-            &launcher_path,
-            &pkg_id,
-            &env_map,
-            &args_vec,
-        )
-        .map_err(|e| format!("Failed to generate launcher: {}", e))?;
-
-        // Setup desktop entries
-        let desktop_files = self.setup_desktop_files(&app_dir, &pkg_id, &launcher_path, &desc);
-        let icons = self.setup_icons(&app_dir, &pkg_id);
-
         let now = chrono::Local::now().to_rfc3339();
-        Ok(PackageRecord {
+
+        let mut record = PackageRecord {
             id: pkg_id.clone(),
-            name: pkg_id,
+            name: pkg_id.clone(),
             version,
             format: "deb".to_string(),
             mode: self.config.mode.clone(),
             install_date: now,
-            install_dir: app_dir,
+            install_dir: app_dir.clone(),
             source_file: Some(self.file_path.to_string_lossy().to_string()),
-            binaries: vec![launcher_path],
-            desktop_files,
-            icons,
+            entrypoint: Some(rel_primary),
+            binaries: vec![launcher_path.clone()],
+            desktop_files: Vec::new(),
+            icons: Vec::new(),
             installed_files_count: None,
             total_size_bytes: Some(file_size),
-            is_gui: Some(true),
-            description: Some(desc),
+            is_gui: Some(is_gui),
+            description: Some(desc.clone()),
             repo: self.repo.clone(),
             tag: self.tag.clone(),
             etag: None,
@@ -251,40 +290,83 @@ impl DebPackage {
             env: env_map,
             args: args_vec,
             pinned: false,
+            bwrap: if has_opt { Some(true) } else { None },
+            bind_opt,
             ..Default::default()
-        })
+        };
+
+        connect_package_binaries(
+            &mut record,
+            &self.config.bin_dir,
+            &secondary_rels,
+            owned_launchers,
+        )?;
+
+        let icons = self.setup_icons(&app_dir, &pkg_id);
+        let desktop_files = self.setup_desktop_files(
+            &app_dir,
+            &pkg_id,
+            &launcher_path,
+            &desc,
+            orig_desktop_rel.as_deref(),
+            binary_is_gui,
+            !icons.is_empty(),
+        );
+        record.icons = icons;
+        record.desktop_files = desktop_files;
+
+        Ok(record)
     }
 
-    fn discover_primary_exe(app_dir: &Path, pkg_id: &str) -> Result<PathBuf, String> {
+    pub fn discover_primary_exe(app_dir: &Path, pkg_id: &str) -> Result<PathBuf, String> {
+        let (primary, _) = Self::discover_executables(app_dir, pkg_id)?;
+        Ok(primary)
+    }
+
+    pub fn discover_executables(
+        app_dir: &Path,
+        pkg_id: &str,
+    ) -> Result<(PathBuf, Vec<PathBuf>), String> {
         let mut executables = Vec::new();
+        let mut bin_dir_exes = Vec::new();
         let search_dirs = [
             app_dir.join("usr/bin"),
             app_dir.join("bin"),
             app_dir.join("opt"),
         ];
 
-        for s_dir in &search_dirs {
+        for (idx, s_dir) in search_dirs.iter().enumerate() {
             if s_dir.exists() {
                 for entry in walkdir::WalkDir::new(s_dir).into_iter().flatten() {
                     let p = entry.path();
                     let name = p.file_name().unwrap_or_default().to_string_lossy();
-                    if p.is_file() && !name.ends_with(".so") && !name.contains(".so.")
-                        && crate::formats::archive::ArchivePackage::is_executable_file(p) {
-                            executables.push(p.to_path_buf());
+                    if p.is_file()
+                        && !name.ends_with(".so")
+                        && !name.contains(".so.")
+                        && crate::formats::archive::ArchivePackage::is_executable_file(p)
+                    {
+                        let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
+                        executables.push(p.to_path_buf());
+                        if idx <= 1 {
+                            bin_dir_exes.push(p.to_path_buf());
                         }
+                    }
                 }
             }
         }
 
         if executables.is_empty() {
-            // Fallback scan all
             for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
                 let p = entry.path();
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                if p.is_file() && !name.ends_with(".so") && !name.contains(".so.")
-                    && crate::formats::archive::ArchivePackage::is_executable_file(p) {
-                        executables.push(p.to_path_buf());
-                    }
+                if p.is_file()
+                    && !name.ends_with(".so")
+                    && !name.contains(".so.")
+                    && crate::formats::archive::ArchivePackage::is_executable_file(p)
+                {
+                    let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
+                    executables.push(p.to_path_buf());
+                }
             }
         }
 
@@ -292,112 +374,107 @@ impl DebPackage {
             return Err("No executable binary found in deb package".to_string());
         }
 
-        for exe in &executables {
-            let name = exe
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            if name == pkg_id.to_lowercase() {
-                return Ok(exe.clone());
+        executables.sort();
+        let primary = executables
+            .iter()
+            .find(|exe| {
+                exe.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(pkg_id)
+            })
+            .cloned()
+            .unwrap_or_else(|| executables[0].clone());
+
+        let ignored_helpers = ["crashreporter", "updater", "elevate", "uninstall"];
+        let mut seen_names = BTreeSet::new();
+        if let Some(p_name) = primary.file_name().and_then(|n| n.to_str()) {
+            seen_names.insert(p_name.to_string());
+        }
+        let mut secondary = Vec::new();
+        bin_dir_exes.sort();
+        for exe in bin_dir_exes {
+            if exe == primary {
+                continue;
+            }
+            let name = exe.file_name().unwrap_or_default().to_string_lossy();
+            let lower = name.to_lowercase();
+            if ignored_helpers.iter().any(|h| lower.contains(h)) {
+                continue;
+            }
+            if seen_names.insert(name.to_string()) {
+                secondary.push(exe);
             }
         }
 
-        Ok(executables[0].clone())
+        Ok((primary, secondary))
     }
 
+    fn find_desktop_file(app_dir: &Path) -> Option<PathBuf> {
+        for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
+            let p = entry.path();
+            if p.is_file() && p.extension().map(|e| e == "desktop").unwrap_or(false) {
+                return Some(p.to_path_buf());
+            }
+        }
+        None
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn setup_desktop_files(
         &self,
         app_dir: &Path,
         pkg_id: &str,
         launcher_path: &Path,
         desc: &str,
+        orig_desktop_rel: Option<&Path>,
+        binary_is_gui: bool,
+        has_local_icon: bool,
     ) -> Vec<PathBuf> {
         let mut created = Vec::new();
-        let mut found_dt = None;
-
-        for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
-            let p = entry.path();
-            if p.is_file() && p.extension().map(|e| e == "desktop").unwrap_or(false) {
-                found_dt = Some(p.to_path_buf());
-                break;
-            }
-        }
-
         let dest_dt = self
             .config
             .applications_dir
             .join(format!("appmgr-{}.desktop", pkg_id));
-        if let Some(parent) = dest_dt.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
 
-        if let Some(orig_dt) = found_dt {
-            if let Ok(content) = fs::read_to_string(&orig_dt) {
-                let re = Regex::new(r"(%[a-zA-Z])").unwrap();
-                let mut new_lines = Vec::new();
-                for line in content.lines() {
-                    if line.starts_with("Exec=") {
-                        let extra = if let Some(caps) = re.captures(line) {
-                            format!(" {}", caps.get(1).unwrap().as_str())
-                        } else {
-                            " %U".to_string()
-                        };
-                        new_lines.push(format!("Exec=\"{}\"{}", launcher_path.display(), extra));
-                    } else {
-                        new_lines.push(line.to_string());
-                    }
-                }
-                if fs::write(&dest_dt, new_lines.join("\n") + "\n").is_ok() {
-                    created.push(dest_dt);
-                    return created;
-                }
+        let icon_override = if has_local_icon { Some(pkg_id) } else { None };
+
+        if let Some(rel) = orig_desktop_rel {
+            let orig_dt = app_dir.join(rel);
+            if let Ok(path) =
+                install_patched_desktop_file(&orig_dt, &dest_dt, launcher_path, icon_override)
+            {
+                created.push(path);
+                return created;
             }
         }
 
-        // Fallback desktop creation
-        if create_desktop_entry(
-            &dest_dt,
-            &pkg_id.replace('-', " "),
-            desc,
-            launcher_path,
-            None,
-            "Utility;Application;",
-        )
-        .is_ok()
+        if binary_is_gui
+            && create_desktop_entry(
+                &dest_dt,
+                &pkg_id.replace('-', " "),
+                desc,
+                launcher_path,
+                icon_override,
+                "Utility;Application;",
+            )
+            .is_ok()
         {
             created.push(dest_dt);
         }
+
         created
     }
 
     fn setup_icons(&self, app_dir: &Path, pkg_id: &str) -> Vec<PathBuf> {
-        let mut installed = Vec::new();
-        let icon_extensions = [".png", ".svg"];
-
-        let icon_dirs = [
-            app_dir.join("usr/share/icons"),
-            app_dir.join("usr/share/pixmaps"),
-        ];
-
-        for i_dir in &icon_dirs {
-            if i_dir.exists() {
-                for entry in walkdir::WalkDir::new(i_dir).into_iter().flatten() {
-                    let p = entry.path();
-                    let name = p.file_name().unwrap_or_default().to_string_lossy();
-                    if icon_extensions.iter().any(|ext| name.ends_with(ext)) {
-                        let ext = p.extension().unwrap_or_default().to_string_lossy();
-                        let target_dir = self.config.icons_dir.join("hicolor/256x256/apps");
-                        let _ = fs::create_dir_all(&target_dir);
-                        let target = target_dir.join(format!("{}.{}", pkg_id, ext));
-                        if fs::copy(p, &target).is_ok() {
-                            installed.push(target);
-                            return installed;
-                        }
-                    }
-                }
-            }
-        }
-        installed
+        let icons_root = app_dir.join("usr/share/icons");
+        let pixmaps_root = app_dir.join("usr/share/pixmaps");
+        install_best_icon(
+            &[icons_root.as_path(), pixmaps_root.as_path()],
+            &self.config.icons_dir,
+            pkg_id,
+        )
+        .into_iter()
+        .collect()
     }
 }

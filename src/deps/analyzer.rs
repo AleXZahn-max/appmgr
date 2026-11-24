@@ -1,7 +1,8 @@
-use std::collections::{BTreeSet, HashSet};
+use crate::desktop::inspect_elf_headers;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const CORE_HOST_ONLY_PREFIXES: &[&str] = &[
@@ -53,6 +54,7 @@ impl std::fmt::Display for ElfClass {
     }
 }
 
+#[allow(dead_code)]
 pub fn detect_elf_class(path: &Path) -> Option<ElfClass> {
     let mut f = File::open(path).ok()?;
     let mut header = [0u8; 5];
@@ -65,6 +67,19 @@ pub fn detect_elf_class(path: &Path) -> Option<ElfClass> {
         2 => Some(ElfClass::Elf64),
         _ => None,
     }
+}
+
+pub fn inspect_elf_dynamic(path: &Path) -> Option<(ElfClass, bool)> {
+    let info = inspect_elf_headers(path)?;
+    let class = if info.is_64 {
+        ElfClass::Elf64
+    } else {
+        ElfClass::Elf32
+    };
+    let is_exec_or_dyn =
+        info.e_type == goblin::elf::header::ET_EXEC || info.e_type == goblin::elf::header::ET_DYN;
+    let is_dynamic = is_exec_or_dyn && (info.has_pt_interp || info.has_pt_dynamic);
+    Some((class, is_dynamic))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -122,13 +137,10 @@ pub fn parse_ldd_output(
 
 /// Collects internal library paths and SONAMEs within app_dir,
 /// so internal bundled libraries (e.g. libcef.so, libffmpeg.so) are not reported as missing.
-pub fn collect_internal_library_environment(
-    app_dir: &Path,
-) -> (String, HashSet<String>) {
+pub fn collect_internal_library_environment(app_dir: &Path) -> (String, HashSet<String>) {
     let mut lib_dirs = BTreeSet::new();
     let mut sonames = HashSet::new();
 
-    // Standard expected paths
     let standard_subdirs = [
         "deps/lib",
         "usr/lib",
@@ -182,8 +194,8 @@ pub fn collect_internal_library_environment(
     (full_ld_path, sonames)
 }
 
-/// Scans all ELF binaries in an installed application directory, runs ldd with
-/// internal library paths configured, and aggregates missing shared libraries.
+/// Scans ELF binaries in `app_dir`, filters dynamic ELFs via `PT_INTERP`/`ET_DYN`,
+/// and batches paths per `ElfClass` into `ldd`.
 pub fn scan_app_dependencies(app_dir: &Path) -> AppDepsAnalysis {
     let mut analysis = AppDepsAnalysis::default();
 
@@ -198,55 +210,55 @@ pub fn scan_app_dependencies(app_dir: &Path) -> AppDepsAnalysis {
         let p = entry.path();
         if p.is_file() && !p.is_symlink() {
             let name = p.file_name().unwrap_or_default().to_string_lossy();
-            // Focus on executables and non-shared library ELFs first
             if !name.ends_with(".so") && !name.contains(".so.") {
-                if let Some(class) = detect_elf_class(p) {
-                    candidate_elfs.push((p.to_path_buf(), class));
+                if let Some((class, is_dyn)) = inspect_elf_dynamic(p) {
+                    candidate_elfs.push((p.to_path_buf(), class, is_dyn));
                 }
             }
         }
     }
 
-    // If no standalone executables found, scan all ELFs
     if candidate_elfs.is_empty() {
         for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
             let p = entry.path();
             if p.is_file() && !p.is_symlink() {
-                if let Some(class) = detect_elf_class(p) {
-                    candidate_elfs.push((p.to_path_buf(), class));
+                if let Some((class, is_dyn)) = inspect_elf_dynamic(p) {
+                    candidate_elfs.push((p.to_path_buf(), class, is_dyn));
                 }
             }
         }
     }
 
     analysis.total_elfs = candidate_elfs.len();
-    let mut missing_set = BTreeSet::new();
+    let mut by_class: BTreeMap<ElfClass, Vec<PathBuf>> = BTreeMap::new();
 
-    for (elf_path, elf_class) in candidate_elfs {
+    for (elf_path, elf_class, is_dyn) in candidate_elfs {
         if analysis.app_elf_class.is_none() {
             analysis.app_elf_class = Some(elf_class);
         }
-
-        let mut cmd = Command::new("ldd");
-        cmd.arg(&elf_path);
-        if !ld_library_path.is_empty() {
-            cmd.env("LD_LIBRARY_PATH", &ld_library_path);
+        if is_dyn {
+            analysis.dynamic_elfs += 1;
+            by_class.entry(elf_class).or_default().push(elf_path);
         }
+    }
 
-        if let Ok(output) = cmd.output() {
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            let combined = format!("{}\n{}", stdout_str, stderr_str);
-
-            let lower = combined.to_lowercase();
-            if lower.contains("not a dynamic executable") || lower.contains("statically linked") {
-                continue;
+    let mut missing_set = BTreeSet::new();
+    for (elf_class, paths) in by_class {
+        for chunk in paths.chunks(64) {
+            let mut cmd = Command::new("ldd");
+            cmd.args(chunk);
+            if !ld_library_path.is_empty() {
+                cmd.env("LD_LIBRARY_PATH", &ld_library_path);
             }
 
-            analysis.dynamic_elfs += 1;
-            let missing_for_bin = parse_ldd_output(&combined, elf_class, &internal_sonames);
-            for m in missing_for_bin {
-                missing_set.insert(m);
+            if let Ok(output) = cmd.output() {
+                let stdout_str = String::from_utf8_lossy(&output.stdout);
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                let combined = format!("{}\n{}", stdout_str, stderr_str);
+
+                for m in parse_ldd_output(&combined, elf_class, &internal_sonames) {
+                    missing_set.insert(m);
+                }
             }
         }
     }
@@ -275,7 +287,6 @@ mod tests {
         assert!(is_core_host_only("libpulse.so.0"));
         assert!(is_core_host_only("libpipewire-0.3.so.0"));
 
-        // Non-host-only libraries should NOT be blocked
         assert!(!is_core_host_only("libayatana-indicator3.so.7"));
         assert!(!is_core_host_only("libayatana-ido3-0.4.so.0"));
         assert!(!is_core_host_only("libssl.so.3"));
@@ -311,10 +322,12 @@ mod tests {
     #[test]
     fn test_parse_ldd_output_with_internal_filter() {
         let sample_output = r#"
+        /tmp/bin1:
         linux-vdso.so.1 (0x00007ffe341f4000)
         libayatana-indicator3.so.7 => not found
         libinternal.so.1 => not found
         libgtk-3.so.0 => /usr/lib/libgtk-3.so.0 (0x00007f9c2d000000)
+        /tmp/bin2:
         libayatana-ido3-0.4.so.0 => not found
         libc.so.6 => /usr/lib/libc.so.6 (0x00007f9c2ce00000)
         /lib64/ld-linux-x86-64.so.2 => /usr/lib64/ld-linux-x86-64.so.2 (0x00007f9c2da00000)
