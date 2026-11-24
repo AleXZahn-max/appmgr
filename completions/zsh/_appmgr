@@ -15,6 +15,7 @@ _appmgr() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -36,6 +37,7 @@ _appmgr() {
 _arguments "${_arguments_options[@]}" : \
 '--repo=[Associate package with GitHub repository (owner/repo)]:REPO:_default' \
 '--prefer=[Preferred asset format]:PREFER:(appimage deb tar zip bin)' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-f[Force overwrite existing installation]' \
 '--force[Force overwrite existing installation]' \
 '-y[Assume yes to prompts]' \
@@ -48,14 +50,16 @@ _arguments "${_arguments_options[@]}" : \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':package -- Path to package, GitHub target (owner/repo\[@tag\]), or search query:_default' \
+'*::packages -- Package paths, GitHub targets (owner/repo\[@tag\]), registry IDs, or search queries:_default' \
 && ret=0
 ;;
 (search)
 _arguments "${_arguments_options[@]}" : \
 '--source=[Filter by specific source ID]:SOURCE:_default' \
 '--driver=[Filter by driver type (apt, appimagehub, aur, github)]:DRIVER:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--offline[Search only local repository cache]' \
+'--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -67,6 +71,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (update)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -77,6 +82,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (repo)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -95,6 +101,7 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (list)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
@@ -109,6 +116,7 @@ _arguments "${_arguments_options[@]}" : \
 '--suite=[Debian suite / distribution branch (for apt)]:SUITE:_default' \
 '--components=[Debian components (for apt)]:COMPONENTS:_default' \
 '--priority=[Priority ranking (0..1000)]:PRIORITY:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -122,6 +130,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (remove)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -133,6 +142,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (enable)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -144,6 +154,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (disable)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -199,6 +210,7 @@ esac
 ;;
 (source)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -217,6 +229,7 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (lint)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -228,6 +241,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (test)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -271,10 +285,12 @@ esac
 ;;
 (deps)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--all[Check dependencies for all installed applications]' \
 '--fix[Resolve and install missing dependencies]' \
 '--auto-deps[Automatically confirm host package installation]' \
 '--rootless-deps[Bundle missing libraries into local sandbox (no sudo)]' \
+'--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -286,6 +302,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (pkg)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -306,6 +323,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-o+[Destination TOML file path]:OUTPUT:_default' \
 '--output=[Destination TOML file path]:OUTPUT:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -317,6 +335,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (lint)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -328,6 +347,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (test)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--dry-run[Emulate checks without modifying system]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
@@ -376,6 +396,7 @@ esac
 ;;
 (link)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -389,6 +410,7 @@ _arguments "${_arguments_options[@]}" : \
 (upgrade)
 _arguments "${_arguments_options[@]}" : \
 '--prefer=[Preferred asset format]:PREFER:(appimage deb tar zip bin)' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-c[Check for available updates without installing]' \
 '--check[Check for available updates without installing]' \
 '-y[Assume yes to prompts]' \
@@ -406,19 +428,21 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (remove)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Assume yes to prompts]' \
 '--yes[Assume yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':package -- Name or ID of installed application:_default' \
+'*::packages -- Names or IDs of installed applications:_default' \
 && ret=0
 ;;
 (list)
 _arguments "${_arguments_options[@]}" : \
 '-t+[Filter by package format]:FILTER_TYPE:_default' \
 '--type=[Filter by package format]:FILTER_TYPE:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
@@ -430,6 +454,8 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (info)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -441,6 +467,8 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (doctor)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'--json[Output machine-readable JSON]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -451,6 +479,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (run)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -464,6 +493,7 @@ _arguments "${_arguments_options[@]}" : \
 (env)
 _arguments "${_arguments_options[@]}" : \
 '--unset=[Unset an environment variable]:UNSET:_default' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--list[List configured environment variables]' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
@@ -477,6 +507,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (args)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '--clear[Clear all persistent launch flags]' \
 '--list[List configured launch flags]' \
 '-y[Automatic yes to prompts]' \
@@ -491,28 +522,31 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (pin)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':app -- Application name or ID:_default' \
+'*::apps -- Application names or IDs:_default' \
 && ret=0
 ;;
 (unpin)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':app -- Application name or ID:_default' \
+'*::apps -- Application names or IDs:_default' \
 && ret=0
 ;;
 (rollback)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Assume yes to prompt]' \
 '--yes[Assume yes to prompt]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -524,6 +558,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (clean)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Assume yes to prompt]' \
 '--yes[Assume yes to prompt]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -534,6 +569,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (export)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -545,6 +581,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (import)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Assume yes to all prompts]' \
 '--yes[Assume yes to all prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -556,6 +593,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (update-db)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -566,6 +604,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (self-update)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-c[Check for available appmgr updates without installing]' \
 '--check[Check for available appmgr updates without installing]' \
 '--pre[Allow pre-release versions]' \
@@ -579,6 +618,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (completions)
 _arguments "${_arguments_options[@]}" : \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
 '-y[Automatic yes to prompts]' \
 '--yes[Automatic yes to prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
@@ -808,8 +848,8 @@ _appmgr_commands() {
 'run:Launch an installed application' \
 'env:Manage custom environment variables for an application' \
 'args:Manage persistent launch flags for an application' \
-'pin:Freeze an application version to skip general upgrades' \
-'unpin:Unfreeze an application version to allow updates' \
+'pin:Freeze application version(s) to skip general upgrades' \
+'unpin:Unfreeze application version(s) to allow updates' \
 'rollback:Restore previous version of an application from cache' \
 'clean:Clean rollback backups and temporary cache' \
 'export:Export installed applications to a JSON manifest' \
@@ -875,8 +915,8 @@ _appmgr__subcmd__help_commands() {
 'run:Launch an installed application' \
 'env:Manage custom environment variables for an application' \
 'args:Manage persistent launch flags for an application' \
-'pin:Freeze an application version to skip general upgrades' \
-'unpin:Unfreeze an application version to allow updates' \
+'pin:Freeze application version(s) to skip general upgrades' \
+'unpin:Unfreeze application version(s) to allow updates' \
 'rollback:Restore previous version of an application from cache' \
 'clean:Clean rollback backups and temporary cache' \
 'export:Export installed applications to a JSON manifest' \

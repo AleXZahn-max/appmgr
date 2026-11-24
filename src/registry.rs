@@ -1,12 +1,13 @@
 use crate::drivers::appimagehub::{load_cached_appimagehub_packages, sync_appimagehub_repo};
 use crate::drivers::apt::{load_cached_apt_packages, sync_apt_repo};
 use crate::drivers::aur::search_aur;
-use crate::ui::{apt_prefix, c, Colors};
+use crate::ui::{apt_prefix, c, Colors, Spinner};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
 pub const DEFAULT_REGISTRY_ID: &str = "official";
 pub const DEFAULT_REGISTRY_URL: &str =
@@ -381,10 +382,10 @@ pub async fn sync_all_sources(
 ) -> Result<(usize, usize), String> {
     println!(
         "{} {}",
-        c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+        c("::", &[Colors::BOLD, Colors::CYAN]),
         c(
             "Synchronizing package sources and databases...",
-            &[Colors::BOLD, Colors::BRIGHT_WHITE]
+            &[Colors::BOLD, Colors::WHITE]
         )
     );
 
@@ -419,12 +420,17 @@ pub async fn sync_all_sources(
             }
         }
 
-        match req.send().await {
+        let spinner = Spinner::new(&format!("Fetching registry [{}]...", entry.id));
+        let resp_res = req.send().await;
+        spinner.stop();
+
+        match resp_res {
             Ok(resp) if resp.status() == StatusCode::NOT_MODIFIED => {
                 println!(
-                    "Hit:{} [{}] (cached registry)",
+                    "Hit:{} [{}] {}",
                     num,
-                    c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                    c(&entry.id, &[Colors::BOLD, Colors::GREEN]),
+                    c("(304 Not Modified)", &[Colors::DIM])
                 );
             }
             Ok(resp) if resp.status().is_success() => {
@@ -438,11 +444,11 @@ pub async fn sync_all_sources(
                 if let Ok(bytes) = resp.bytes().await {
                     let kb = bytes.len() as f64 / 1024.0;
                     println!(
-                        "Get:{} {} [{}] ({:.1} KiB)",
+                        "Get:{} {} [{}] {}",
                         num,
-                        entry.url,
-                        c(&entry.id, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
-                        kb
+                        c(&entry.url, &[Colors::DIM]),
+                        c(&entry.id, &[Colors::BOLD, Colors::CYAN]),
+                        c(&format!("({:.1} KiB)", kb), &[Colors::DIM])
                     );
                     let _ = fs::create_dir_all(registries_cache_dir);
                     let _ = fs::write(&cache_file, &bytes);
@@ -456,7 +462,7 @@ pub async fn sync_all_sources(
                 println!(
                     " {} Failed to fetch registry {} [HTTP {}]",
                     apt_prefix("WARN"),
-                    entry.url,
+                    c(&entry.url, &[Colors::DIM]),
                     resp.status()
                 );
             }
@@ -464,7 +470,7 @@ pub async fn sync_all_sources(
                 println!(
                     " {} Network error fetching registry {}: {}",
                     apt_prefix("WARN"),
-                    entry.url,
+                    c(&entry.url, &[Colors::DIM]),
                     e
                 );
             }
@@ -489,16 +495,29 @@ pub async fn sync_all_sources(
         })
         .collect();
 
+    let total_indexed = indexed_sources.len();
+    let spinner = if total_indexed > 0 {
+        Some(Spinner::with_counter(
+            "Synchronizing package indexes...",
+            total_indexed,
+            "checked",
+        ))
+    } else {
+        None
+    };
+    let counter = spinner.as_ref().map(|s| s.counter());
+
     for src in indexed_sources {
         let permit = sem.clone();
         let http = client.clone();
         let cache_dir = indexes_cache_dir.to_path_buf();
         let num = seq_counter;
         seq_counter += 1;
+        let ctr = counter.clone();
 
         tasks.push(tokio::spawn(async move {
             let _permit = permit.acquire().await.unwrap();
-            match src.driver.as_str() {
+            let result = match src.driver.as_str() {
                 "apt" => {
                     let suite = src.suite.as_deref().unwrap_or("stable");
                     let component = src
@@ -516,55 +535,63 @@ pub async fn sync_all_sources(
                     (num, src, res)
                 }
                 _ => (num, src, Ok((false, 0, 0))),
+            };
+            if let Some(ref c_ref) = ctr {
+                c_ref.fetch_add(1, Ordering::Relaxed);
             }
+            result
         }));
     }
 
+    let mut completed_results = Vec::with_capacity(tasks.len());
     for task in tasks {
-        if let Ok((num, src, res)) = task.await {
-            match res {
-                Ok((changed, count, bytes)) => {
-                    total_packages += count;
-                    if changed {
-                        updated_sources_count += 1;
-                        let kb = bytes as f64 / 1024.0;
-                        println!(
-                            "Get:{} {} [{}] ({:.1} KiB, {} pkgs)",
-                            num,
-                            src.url,
-                            c(&src.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-                            kb,
-                            count
-                        );
-                    } else {
-                        println!(
-                            "Hit:{} [{}] (cached, {} pkgs)",
-                            num,
-                            c(&src.id, &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-                            count
-                        );
-                    }
-                }
-                Err(e) => {
+        if let Ok(item) = task.await {
+            completed_results.push(item);
+        }
+    }
+    if let Some(s) = spinner {
+        s.stop();
+    }
+
+    for (num, src, res) in completed_results {
+        match res {
+            Ok((changed, count, bytes)) => {
+                total_packages += count;
+                if changed {
+                    updated_sources_count += 1;
+                    let kb = bytes as f64 / 1024.0;
                     println!(
-                        " {} Failed to update source [{}] {}: {}",
-                        apt_prefix("WARN"),
-                        c(&src.id, &[Colors::BOLD, Colors::YELLOW]),
-                        src.url,
-                        e
+                        "Get:{} {} [{}] {}",
+                        num,
+                        c(&src.url, &[Colors::DIM]),
+                        c(&src.id, &[Colors::BOLD, Colors::CYAN]),
+                        c(&format!("({:.1} KiB, {} pkgs)", kb, count), &[Colors::DIM])
+                    );
+                } else {
+                    println!(
+                        "Hit:{} [{}] {}",
+                        num,
+                        c(&src.id, &[Colors::BOLD, Colors::GREEN]),
+                        c(&format!("(cached, {} pkgs)", count), &[Colors::DIM])
                     );
                 }
+            }
+            Err(e) => {
+                println!(
+                    " {} Failed to update source [{}] {}: {}",
+                    apt_prefix("WARN"),
+                    c(&src.id, &[Colors::BOLD, Colors::YELLOW]),
+                    c(&src.url, &[Colors::DIM]),
+                    e
+                );
             }
         }
     }
 
     println!(
         "\n{} Sources updated successfully. {} packages available in index.\n",
-        c("::", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-        c(
-            &total_packages.to_string(),
-            &[Colors::BOLD, Colors::BRIGHT_WHITE]
-        )
+        c("::", &[Colors::BOLD, Colors::GREEN]),
+        c(&total_packages.to_string(), &[Colors::BOLD, Colors::WHITE])
     );
 
     Ok((updated_sources_count, total_packages))
@@ -574,7 +601,7 @@ pub async fn sync_all_sources(
 // Unified Search Across Indexed and Online Drivers
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnifiedSearchResult {
     pub source_id: String,
     pub driver: String,

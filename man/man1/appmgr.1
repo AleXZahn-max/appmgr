@@ -1,4 +1,4 @@
-.TH APPMGR 1 "November 2026" "appmgr 2.2.1" "User Commands"
+.TH APPMGR 1 "November 2026" "appmgr 2.3.0" "User Commands"
 .SH NAME
 appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with Package Registry and GitHub integration
 .SH SYNOPSIS
@@ -9,8 +9,8 @@ appmgr \- Universal application combine for .deb, .AppImage, binary archives (.t
 is a hybrid package management combine that brings the aesthetics of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v2 TOML source recipes, direct downloads, HTTP 302 redirects, GitHub Search and Releases APIs, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
 .SH COMMANDS
 .TP
-\fBinstall\fR, \fBi\fR \fITARGET\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR]
-Installs a package with automatic target detection:
+\fBinstall\fR, \fBi\fR \fITARGET...\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR]
+Installs one or more packages with automatic target detection:
 1. If \fITARGET\fR is an existing local file (.deb, .AppImage, .tar.*, .zip, or standalone ELF binary), installs it locally.
 2. If \fITARGET\fR ends with \fB.toml\fR, parses and installs directly from the declarative recipe.
 3. If \fITARGET\fR matches a package ID in active registries, installs according to the recipe's source configuration.
@@ -18,12 +18,12 @@ Installs a package with automatic target detection:
 5. Otherwise, treats \fITARGET\fR as an application name and searches GitHub repositories, presenting an interactive selection menu.
 Automatically filters assets by host architecture, validates SHA-256 checksums if available, cleans launcher names, sets up desktop integration, and performs automatic 2-tier shared library dependency resolution (host package manager + rootless sandbox pool).
 .TP
-\fBdeps\fR [\fIAPP\fR] [\fI--all\fR] [\fI--fix\fR] [\fI--auto-deps\fR] [\fI--rootless-deps\fR]
+\fBdeps\fR [\fIAPP\fR] [\fI--all\fR] [\fI--fix\fR] [\fI--auto-deps\fR] [\fI--rootless-deps\fR] [\fI--json\fR]
 Inspects or repairs dynamic shared library (.so) dependencies for installed applications.
 With \fI--fix\fR, automatically resolves missing dependencies via native host packages (Tier 1) or downloads rootless library bundles into the application's isolated sandbox (Tier 2).
 .TP
-\fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR [\fI--source ID\fR] [\fI--driver TYPE\fR] [\fI--offline\fR]
-Searches local package registry databases and upstream GitHub repositories for applications matching \fIQUERY\fR.
+\fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR [\fI--source ID\fR] [\fI--driver TYPE\fR] [\fI--offline\fR] [\fI--json\fR]
+Searches local package registry databases and upstream GitHub repositories for applications matching \fIQUERY\fR. In an interactive TTY without \fI--json\fR, prompts to install a selected result by number.
 .TP
 \fBupdate\fR, \fBsync\fR
 Synchronizes local repository databases from configured package registries in sources.list using ETag caching and concurrent retrieval.
@@ -61,11 +61,11 @@ Manages custom environment variables for an application and regenerates its laun
 \fBargs\fR \fIAPP\fR [\fIFLAGS ...\fR] [\fI--clear\fR] [\fI--list\fR]
 Configures persistent CLI arguments for an application that are automatically passed on every launch.
 .TP
-\fBpin\fR \fIAPP\fR
-Freezes an application to its current version, preventing general upgrades from modifying it.
+\fBpin\fR \fIAPP...\fR
+Freezes one or more applications to their current versions, preventing general upgrades from modifying them.
 .TP
-\fBunpin\fR \fIAPP\fR
-Unfreezes an application, re-enabling automatic updates during upgrade.
+\fBunpin\fR \fIAPP...\fR
+Unfreezes one or more applications, re-enabling automatic updates during upgrade.
 .TP
 \fBexport\fR [\fIFILE.json\fR]
 Exports all installed applications, formats, repository links, env vars, and launch flags into a JSON manifest file.
@@ -73,16 +73,16 @@ Exports all installed applications, formats, repository links, env vars, and lau
 \fBimport\fR \fIFILE.json\fR [\fI-y\fR]
 Reads a JSON manifest file, installs missing applications from GitHub or registries, and applies their pin, env, and args.
 .TP
-\fBremove\fR, \fBrm\fR, \fBuninstall\fR \fINAME\fR [\fI-y\fR]
-Uninstalls an application, removing all files, launchers, icons, and desktop entries.
+\fBremove\fR, \fBrm\fR, \fBuninstall\fR \fINAME...\fR [\fI-y\fR]
+Uninstalls one or more applications, removing all files, launchers, icons, and desktop entries.
 .TP
 \fBlist\fR, \fBls\fR [\fI--type TYPE\fR] [\fI--json\fR]
 Displays a table of all managed applications, versions, formats ([DEB], [APPIMAGE], [TAR], [ZIP], [BIN]), pinned status, and installed sizes.
 .TP
-\fBinfo\fR \fITARGET\fR
-Displays metadata, installed location, launch commands, repository origin, and performs shared library (ldd) dependency verification.
+\fBinfo\fR \fITARGET\fR [\fI--json\fR]
+Displays grouped card metadata (Package, Runtime & Paths, Source & Deps) and performs shared library (ldd) dependency verification.
 .TP
-\fBdoctor\fR, \fBcheck\fR
+\fBdoctor\fR, \fBcheck\fR [\fI--json\fR]
 Runs a comprehensive system diagnostic: checks archive tools (tar, xz, zstd), FUSE status, Bubblewrap virtualization, PATH integrity, desktop indexers, broken launchers, and static/dynamic binary dependencies.
 .TP
 \fBrun\fR \fINAME\fR [\fIARGS...\fR]
@@ -107,7 +107,13 @@ Install into user home directory (~/.local) without requiring root/sudo privileg
 \fB--system\fR
 Install system-wide into /opt/appmgr/apps and /usr/local/bin (requires root/sudo).
 .TP
+\fB--color\fR \fIauto|always|never\fR
+Control colored terminal output (also respects \fBNO_COLOR\fR and \fBCLICOLOR=0\fR).
+.TP
 \fB-V\fR, \fB--version\fR
 Show version and exit.
+.SH FILES
+\fB$XDG_CONFIG_HOME/appmgr/config.toml\fR (default \fB~/.config/appmgr/config.toml\fR)
+Optional TOML configuration supporting \fBdefault_prefer\fR, \fBdeps_mode\fR, \fBkeep_backups\fR, \fBcolor\fR, and \fBdebian_suite\fR.
 .SH AUTHORS
 Alex Zahn

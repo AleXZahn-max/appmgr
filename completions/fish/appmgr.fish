@@ -1,6 +1,6 @@
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_appmgr_global_optspecs
-    string join \n y/yes system user h/help V/version
+    string join \n y/yes system user color= h/help V/version
 end
 
 function __fish_appmgr_needs_command
@@ -24,6 +24,9 @@ function __fish_appmgr_using_subcommand
     contains -- $cmd[1] $argv
 end
 
+complete -c appmgr -n "__fish_appmgr_needs_command" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_needs_command" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_needs_command" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_needs_command" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -45,8 +48,8 @@ complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "doctor" -d 'Check sys
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "run" -d 'Launch an installed application'
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "env" -d 'Manage custom environment variables for an application'
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "args" -d 'Manage persistent launch flags for an application'
-complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "pin" -d 'Freeze an application version to skip general upgrades'
-complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "unpin" -d 'Unfreeze an application version to allow updates'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "pin" -d 'Freeze application version(s) to skip general upgrades'
+complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "unpin" -d 'Unfreeze application version(s) to allow updates'
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "rollback" -d 'Restore previous version of an application from cache'
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "clean" -d 'Clean rollback backups and temporary cache'
 complete -c appmgr -n "__fish_appmgr_needs_command" -f -a "export" -d 'Export installed applications to a JSON manifest'
@@ -61,6 +64,9 @@ deb\t''
 tar\t''
 zip\t''
 bin\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s f -l force -d 'Force overwrite existing installation'
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s y -l yes -d 'Assume yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l pre -d 'Allow pre-release versions'
@@ -72,15 +78,25 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l user -d 'Force
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s h -l help -d 'Print help'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l source -d 'Filter by specific source ID' -r
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l driver -d 'Filter by driver type (apt, appimagehub, aur, github)' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l offline -d 'Search only local repository cache'
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand update" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -91,6 +107,9 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -f -a "enable" -d 'Enable a previously disabled repository'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -f -a "disable" -d 'Disable a repository without deleting its configuration'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and not __fish_seen_subcommand_from list add remove enable disable help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from list" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from list" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from list" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from list" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
@@ -99,18 +118,30 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subc
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l suite -d 'Debian suite / distribution branch (for apt)' -r
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l components -d 'Debian components (for apt)' -r
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l priority -d 'Priority ranking (0..1000)' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from add" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from remove" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from remove" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from remove" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from remove" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from remove" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from enable" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from enable" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from enable" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from enable" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from enable" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from disable" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from disable" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from disable" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from disable" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -121,6 +152,9 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subc
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from help" -f -a "enable" -d 'Enable a previously disabled repository'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from help" -f -a "disable" -d 'Disable a repository without deleting its configuration'
 complete -c appmgr -n "__fish_appmgr_using_subcommand repo; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -128,10 +162,16 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_see
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -f -a "lint" -d 'Lint and validate a source definition TOML against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -f -a "test" -d 'Test source endpoint reachability and index access'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and not __fish_seen_subcommand_from lint test help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from lint" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from lint" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from lint" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from lint" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from lint" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from test" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from test" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from test" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from test" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -139,14 +179,21 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_su
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from help" -f -a "lint" -d 'Lint and validate a source definition TOML against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from help" -f -a "test" -d 'Test source endpoint reachability and index access'
 complete -c appmgr -n "__fish_appmgr_using_subcommand source; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l all -d 'Check dependencies for all installed applications'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l fix -d 'Resolve and install missing dependencies'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l auto-deps -d 'Automatically confirm host package installation'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l rootless-deps -d 'Bundle missing libraries into local sandbox (no sudo)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand deps" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -156,14 +203,23 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_s
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "test" -d 'Test source resolution and URL reachability for a recipe'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -s o -l output -d 'Destination TOML file path' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from lint" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from lint" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from lint" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from lint" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from lint" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -l dry-run -d 'Emulate checks without modifying system'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
@@ -173,6 +229,9 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subco
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "lint" -d 'Lint and validate a TOML source recipe against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "test" -d 'Test source resolution and URL reachability for a recipe'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c appmgr -n "__fish_appmgr_using_subcommand link" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand link" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand link" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand link" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -182,6 +241,9 @@ deb\t''
 tar\t''
 zip\t''
 bin\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s c -l check -d 'Check for available updates without installing'
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s y -l yes -d 'Assume yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s f -l force -d 'Force upgrade even if pinned'
@@ -190,74 +252,124 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l json -d 'Outpu
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand upgrade" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -s y -l yes -d 'Assume yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand remove" -s h -l help -d 'Print help'
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s t -l type -d 'Filter by package format' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand list" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand info" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand info" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand info" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
+complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l json -d 'Output machine-readable JSON'
 complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand doctor" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand run" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand run" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand run" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand run" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand run" -s h -l help -d 'Print help'
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l unset -d 'Unset an environment variable' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l list -d 'List configured environment variables'
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand env" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l clear -d 'Clear all persistent launch flags'
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l list -d 'List configured launch flags'
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand args" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pin" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand unpin" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -s y -l yes -d 'Assume yes to prompt'
 complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand rollback" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -s y -l yes -d 'Assume yes to prompt'
 complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand clean" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand export" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand export" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand export" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand export" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand export" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand import" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand import" -s y -l yes -d 'Assume yes to all prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand import" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand import" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand import" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand update-db" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s c -l check -d 'Check for available appmgr updates without installing'
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l pre -d 'Allow pre-release versions'
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s y -l yes -d 'Assume yes to prompt'
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand self-update" -s h -l help -d 'Print help'
+complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -l color -d 'Colorize output (auto, always, never)' -r -f -a "auto\t''
+always\t''
+never\t''"
 complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand completions" -l user -d 'Force user-level rootless mode (~/.local)'
@@ -278,8 +390,8 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "run" -d 'Launch an installed application'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "env" -d 'Manage custom environment variables for an application'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "args" -d 'Manage persistent launch flags for an application'
-complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "pin" -d 'Freeze an application version to skip general upgrades'
-complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "unpin" -d 'Unfreeze an application version to allow updates'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "pin" -d 'Freeze application version(s) to skip general upgrades'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "unpin" -d 'Unfreeze application version(s) to allow updates'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "rollback" -d 'Restore previous version of an application from cache'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "clean" -d 'Clean rollback backups and temporary cache'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and not __fish_seen_subcommand_from install search update repo source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help" -f -a "export" -d 'Export installed applications to a JSON manifest'

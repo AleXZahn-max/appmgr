@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const DEBIAN_MIRROR_ROOT: &str = "https://deb.debian.org/debian";
-pub const DEBIAN_SUITE: &str = "bookworm";
+pub const DEFAULT_DEBIAN_SUITE: &str = "bookworm";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootlessDebInfo {
@@ -279,7 +279,7 @@ pub async fn download_file_cached(
         .map(|s| s.to_string());
 
     let total_bytes = resp.content_length().unwrap_or(0);
-    let mut bar = PacmanBar::new(100, label, "%");
+    let mut bar = PacmanBar::new(total_bytes, label);
 
     let temp_dest = dest_path.with_extension("part");
     let mut file =
@@ -293,12 +293,9 @@ pub async fn download_file_cached(
         file.write_all(&chunk)
             .map_err(|e| format!("File write error: {}", e))?;
         downloaded += chunk.len() as u64;
-
-        if let Some(pct) = (downloaded * 100).checked_div(total_bytes) {
-            bar.update(pct as usize, "");
-        }
+        bar.update(downloaded);
     }
-    bar.finish("Complete");
+    bar.finish(&format!("Downloaded {}", label));
 
     if fs::rename(&temp_dest, dest_path).is_err() {
         fs::copy(&temp_dest, dest_path).map_err(|e| e.to_string())?;
@@ -317,8 +314,14 @@ pub async fn ensure_debian_index_cached(
     client: &reqwest::Client,
     cache_dir: &Path,
     arch_str: &str,
+    debian_suite: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
-    let deps_index_dir = cache_dir.join("deps-index");
+    let suite = if debian_suite.trim().is_empty() {
+        DEFAULT_DEBIAN_SUITE
+    } else {
+        debian_suite.trim()
+    };
+    let deps_index_dir = cache_dir.join("deps-index").join(suite);
     fs::create_dir_all(&deps_index_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
@@ -330,17 +333,18 @@ pub async fn ensure_debian_index_cached(
 
     let contents_url = format!(
         "{}/dists/{}/main/{}",
-        DEBIAN_MIRROR_ROOT, DEBIAN_SUITE, contents_filename
+        DEBIAN_MIRROR_ROOT, suite, contents_filename
     );
     let packages_url = format!(
         "{}/dists/{}/main/binary-{}/Packages.gz",
-        DEBIAN_MIRROR_ROOT, DEBIAN_SUITE, arch_str
+        DEBIAN_MIRROR_ROOT, suite, arch_str
     );
 
     if !contents_path.exists() {
         println!(
-            "{} Initializing Debian library index cache for {} ...",
+            "{} Initializing Debian ({}) library index cache for {} ...",
             apt_prefix("INFO"),
+            suite,
             arch_str
         );
     }
@@ -371,6 +375,7 @@ pub async fn resolve_rootless_libraries(
     cache_dir: &Path,
     app_dir: &Path,
     initial_missing: &[MissingLib],
+    debian_suite: &str,
 ) -> Result<Vec<String>, String> {
     let deps_lib_dir = app_dir.join("deps").join("lib");
     fs::create_dir_all(&deps_lib_dir).map_err(|e| format!("Failed to create deps/lib: {}", e))?;
@@ -404,7 +409,7 @@ pub async fn resolve_rootless_libraries(
             };
 
             let (contents_path, packages_path) =
-                ensure_debian_index_cached(client, cache_dir, arch_str).await?;
+                ensure_debian_index_cached(client, cache_dir, arch_str, debian_suite).await?;
 
             println!(
                 "{} Resolving '{}' ({}) via rootless Debian pool ...",
@@ -482,7 +487,7 @@ pub async fn resolve_rootless_libraries(
             }
 
             let total_bytes = resp.content_length().unwrap_or(0);
-            let mut bar = PacmanBar::new(100, deb_filename, "%");
+            let mut bar = PacmanBar::new(total_bytes, deb_filename);
             let mut file = File::create(&temp_deb_path)
                 .map_err(|e| format!("Failed to create {}: {}", temp_deb_path.display(), e))?;
 
@@ -496,12 +501,9 @@ pub async fn resolve_rootless_libraries(
                     .map_err(|e| format!("Write error: {}", e))?;
                 hasher.update(&chunk);
                 downloaded += chunk.len() as u64;
-
-                if let Some(pct) = (downloaded * 100).checked_div(total_bytes) {
-                    bar.update(pct as usize, "");
-                }
+                bar.update(downloaded);
             }
-            bar.finish("Complete");
+            bar.finish(&format!("Downloaded {}", deb_filename));
 
             let calculated_hash = hex::encode(hasher.finalize());
             if !deb_info.sha256.is_empty() && calculated_hash != deb_info.sha256.to_lowercase() {
@@ -515,7 +517,7 @@ pub async fn resolve_rootless_libraries(
             println!(
                 "{} SHA-256 verified ({})",
                 apt_prefix("OK"),
-                &calculated_hash[..8]
+                c(&calculated_hash[..8], &[Colors::DIM])
             );
 
             // 4. Extract *.so* files into app_dir/deps/lib/
@@ -532,10 +534,7 @@ pub async fn resolve_rootless_libraries(
                 "{} Extracted {} library files into {}",
                 apt_prefix("OK"),
                 extracted.len(),
-                c(
-                    &deps_lib_dir.display().to_string(),
-                    &[Colors::BOLD, Colors::BRIGHT_GREEN]
-                )
+                c(&deps_lib_dir.display().to_string(), &[Colors::DIM])
             );
         }
 

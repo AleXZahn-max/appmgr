@@ -67,17 +67,23 @@ Categories={}
 }
 
 pub fn run_system_triggers(applications_dir: &Path, icons_dir: &Path) {
-    println!("Processing triggers for desktop-file-utils ...");
-    if which::which("update-desktop-database").is_ok() {
+    if which::which("update-desktop-database").is_ok() && applications_dir.exists() {
+        println!(
+            " {} Processing triggers for desktop-file-utils ...",
+            crate::ui::apt_prefix("TRIG")
+        );
         let _ = Command::new("update-desktop-database")
             .arg(applications_dir)
             .output();
     }
 
-    println!("Processing triggers for hicolor-icon-theme ...");
     if which::which("gtk-update-icon-cache").is_ok() {
         let theme_dir = icons_dir.join("hicolor");
         if theme_dir.exists() {
+            println!(
+                " {} Processing triggers for hicolor-icon-theme ...",
+                crate::ui::apt_prefix("TRIG")
+            );
             let _ = Command::new("gtk-update-icon-cache")
                 .args(["-q", "-t", "-f"])
                 .arg(&theme_dir)

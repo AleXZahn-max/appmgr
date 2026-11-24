@@ -31,8 +31,33 @@ pub struct Cli {
     )]
     pub user: bool,
 
+    #[arg(
+        long = "color",
+        value_enum,
+        global = true,
+        help = "Colorize output (auto, always, never)"
+    )]
+    pub color: Option<ColorArg>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorArg {
+    Auto,
+    Always,
+    Never,
+}
+
+impl From<ColorArg> for crate::ui::ColorMode {
+    fn from(value: ColorArg) -> Self {
+        match value {
+            ColorArg::Auto => crate::ui::ColorMode::Auto,
+            ColorArg::Always => crate::ui::ColorMode::Always,
+            ColorArg::Never => crate::ui::ColorMode::Never,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -43,8 +68,12 @@ pub enum Commands {
         about = "Install application locally, from GitHub (owner/repo[@tag]), or search"
     )]
     Install {
-        #[arg(help = "Path to package, GitHub target (owner/repo[@tag]), or search query")]
-        package: String,
+        #[arg(
+            required = true,
+            num_args = 1..,
+            help = "Package paths, GitHub targets (owner/repo[@tag]), registry IDs, or search queries"
+        )]
+        packages: Vec<String>,
 
         #[arg(
             short = 'f',
@@ -112,6 +141,9 @@ pub enum Commands {
 
         #[arg(long = "offline", help = "Search only local repository cache")]
         offline: bool,
+
+        #[arg(long = "json", help = "Output machine-readable JSON")]
+        json: bool,
     },
 
     #[command(
@@ -162,6 +194,9 @@ pub enum Commands {
             help = "Bundle missing libraries into local sandbox (no sudo)"
         )]
         rootless_deps: bool,
+
+        #[arg(long = "json", help = "Output machine-readable JSON")]
+        json: bool,
     },
 
     #[command(about = "Maintainer tools for recipe creation, linting, and testing")]
@@ -222,8 +257,12 @@ pub enum Commands {
         about = "Remove an installed application"
     )]
     Remove {
-        #[arg(help = "Name or ID of installed application")]
-        package: String,
+        #[arg(
+            required = true,
+            num_args = 1..,
+            help = "Names or IDs of installed applications"
+        )]
+        packages: Vec<String>,
 
         #[arg(
             short = 'y',
@@ -247,13 +286,19 @@ pub enum Commands {
     Info {
         #[arg(help = "Package ID or file path to inspect")]
         target: String,
+
+        #[arg(long = "json", help = "Output machine-readable JSON")]
+        json: bool,
     },
 
     #[command(
         alias = "check",
         about = "Check system health, FUSE, and broken symlinks"
     )]
-    Doctor,
+    Doctor {
+        #[arg(long = "json", help = "Output machine-readable JSON")]
+        json: bool,
+    },
 
     #[command(about = "Launch an installed application")]
     Run {
@@ -306,16 +351,16 @@ pub enum Commands {
         list: bool,
     },
 
-    #[command(about = "Freeze an application version to skip general upgrades")]
+    #[command(about = "Freeze application version(s) to skip general upgrades")]
     Pin {
-        #[arg(help = "Application name or ID")]
-        app: String,
+        #[arg(required = true, num_args = 1.., help = "Application names or IDs")]
+        apps: Vec<String>,
     },
 
-    #[command(about = "Unfreeze an application version to allow updates")]
+    #[command(about = "Unfreeze application version(s) to allow updates")]
     Unpin {
-        #[arg(help = "Application name or ID")]
-        app: String,
+        #[arg(required = true, num_args = 1.., help = "Application names or IDs")]
+        apps: Vec<String>,
     },
 
     #[command(about = "Restore previous version of an application from cache")]

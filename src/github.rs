@@ -682,9 +682,8 @@ impl GitHubClient {
 
         let total_bytes = resp.content_length().unwrap_or(expected_size);
         let mut bar = PacmanBar::new(
-            100,
+            total_bytes,
             &format!("Downloading {}", truncate_chars(asset_name, 20)),
-            "%",
         );
 
         let mut file =
@@ -700,18 +699,9 @@ impl GitHubClient {
                 .map_err(|e| format!("Error writing chunk: {}", e))?;
             hasher.update(&chunk);
             downloaded += chunk.len() as u64;
-
-            if total_bytes > 0 {
-                let percent = ((downloaded as f64 / total_bytes as f64) * 100.0) as usize;
-                let mb_done = (downloaded as f64) / (1024.0 * 1024.0);
-                let mb_total = (total_bytes as f64) / (1024.0 * 1024.0);
-                bar.update(percent, &format!("{:.1}/{:.1} MB", mb_done, mb_total));
-            } else {
-                let mb_done = (downloaded as f64) / (1024.0 * 1024.0);
-                bar.update(50, &format!("{:.1} MB", mb_done));
-            }
+            bar.update(downloaded);
         }
-        bar.finish(&format!("Downloaded {}", asset_name));
+        bar.finish(&format!("Downloaded {}", truncate_chars(asset_name, 24)));
 
         let computed_sha256 = hex::encode(hasher.finalize()).to_lowercase();
 
@@ -720,10 +710,7 @@ impl GitHubClient {
                 println!(
                     " {} SHA-256 verified ({})",
                     apt_prefix("OK"),
-                    c(
-                        &format!("{}...", &computed_sha256[..12]),
-                        &[Colors::BOLD, Colors::BRIGHT_GREEN]
-                    )
+                    c(&format!("{}...", &computed_sha256[..12]), &[Colors::DIM])
                 );
             } else {
                 let _ = std::fs::remove_file(&temp_dest);
@@ -732,13 +719,10 @@ impl GitHubClient {
                     apt_prefix("FAIL"),
                     asset_name
                 );
-                println!(
-                    "        Expected: {}",
-                    c(&expected, &[Colors::BOLD, Colors::BRIGHT_RED])
-                );
+                println!("        Expected: {}", c(&expected, &[Colors::RED]));
                 println!(
                     "        Computed: {}",
-                    c(&computed_sha256, &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+                    c(&computed_sha256, &[Colors::YELLOW])
                 );
                 return Err(format!("SHA-256 checksum mismatch for {}", asset_name));
             }

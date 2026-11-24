@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.2.1-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,25 +15,20 @@
 </div>
 
 ```text
-┌─── appmgr v2.2.1 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.3.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
-│  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
-│  Reading package lists... Done                                                         │
-│  Building dependency tree... Done                                                      │
+│  :: Fetching release metadata from GitHub: aristocratos/btop                           │
 │                                                                                        │
 │  Packages (1) btop-1.4.0-x86_64.tar.zst [NEW]                                          │
-│                                                                                        │
-│  Total Download Size:    1.82 MiB                                                      │
 │  Total Installed Size:   4.95 MiB                                                      │
 │                                                                                        │
 │  :: Proceed with installation? [Y/n] y                                                 │
-│  (1/1) Downloading btop-x86_64.tar.zst  (████████████ C • • • • • • •)  62%            │
-│  (1/1) Validating SHA-256 checksum...                              [ OK ]              │
-│  (1/1) Unpacking application files...                              [ OK ]              │
-│  :: Setting up environment wrapper into ~/.local/bin/btop...       [ OK ]              │
-│  :: Processing triggers for desktop-file-utils...                  [ OK ]              │
+│  Downloading btop-x86_64.tar.zst [━━━━━━━━━━━━╸─────────]  62% [1.1/1.8 MiB] (4.2 MiB/s)│
+│  [ OK ] SHA-256 verified (e3b0c44298fc...)                                             │
+│  Unpacking btop (1.4.0) ...                                                            │
+│  [ OK ] Installed launcher: ~/.local/bin/btop                                          │
 │                                                                                        │
-│  [ OK ] btop installed successfully! Run with: btop                                    │
+│  :: Transaction completed successfully in 0.42s.                                       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,8 +52,8 @@
 
 ### The Pacman + APT Hybrid Experience
 AppMgr marries the best visual and operational paradigms of two iconic package managers:
-* **From Pacman**: Double-colon prompts (`::`), compact confirmation dialogs (`[Y/n]`), blazing execution speed, and the animated **Candy Pacman progress bar** (`(██████ C • • • •) 45%` — eating dots as files download and unpack).
-* **From APT**: Structured pre-flight verification steps (`Reading package lists... Done`), comprehensive transaction summaries (delta sizes, dependency state, action lists), lifecycle trigger processing (`Processing triggers for desktop-file-utils...`), and clean status badges (`[ OK ]`, `[ WORK ]`, `[ FAIL ]`, `[ WARN ]`).
+* **From Pacman**: Double-colon prompts (`::`), compact confirmation dialogs (`[Y/n]`), blazing execution speed, and a clean progress bar with live throughput (`MiB/s`) and spinner counters.
+* **From APT**: Structured transaction summaries, lifecycle trigger processing (`[TRIG]`), and uniform status badges (`[ OK ]`, `[INFO]`, `[WARN]`, `[FAIL]`, `[WORK]`, `[GET ]`, `[TRIG]`).
 
 ---
 
