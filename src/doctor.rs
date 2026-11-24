@@ -25,6 +25,8 @@ pub struct DoctorReport {
     pub archive_tools: Vec<ToolCheck>,
     pub fuse: FuseStatus,
     pub bwrap_available: bool,
+    pub bwrap_functional: bool,
+    pub bwrap_error: Option<String>,
     pub desktop_tools: Vec<ToolCheck>,
     pub installed_packages_count: usize,
     pub broken_launchers: Vec<String>,
@@ -70,6 +72,11 @@ impl Doctor {
         let libfuse2_available = Self::detect_libfuse2();
 
         let bwrap_available = which::which("bwrap").is_ok();
+        let (bwrap_functional, bwrap_error) = if bwrap_available {
+            Self::probe_bwrap_runtime()
+        } else {
+            (false, None)
+        };
 
         let desktop_tools = [
             ("update-desktop-database", "Desktop database indexing"),
@@ -142,11 +149,43 @@ impl Doctor {
                 libfuse2_available,
             },
             bwrap_available,
+            bwrap_functional,
+            bwrap_error,
             desktop_tools,
             installed_packages_count,
             broken_launchers,
             missing_libraries,
             total_disk_bytes,
+        }
+    }
+
+    fn probe_bwrap_runtime() -> (bool, Option<String>) {
+        match Command::new("bwrap")
+            .args(["--ro-bind", "/", "/", "true"])
+            .output()
+        {
+            Ok(out) if out.status.success() => (true, None),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let lower = stderr.to_lowercase();
+                let hint = if lower.contains("apparmor")
+                    || lower.contains("permission denied")
+                    || lower.contains("operation not permitted")
+                    || lower.contains("uid map")
+                    || lower.contains("namespace")
+                {
+                    "Unprivileged user namespaces appear restricted (check kernel.apparmor_restrict_unprivileged_userns or kernel.unprivileged_userns_clone)."
+                } else {
+                    "bwrap probe 'bwrap --ro-bind / / true' exited with a non-zero status."
+                };
+                let msg = if stderr.is_empty() {
+                    hint.to_string()
+                } else {
+                    format!("{} ({})", stderr, hint)
+                };
+                (false, Some(msg))
+            }
+            Err(e) => (false, Some(format!("Failed to execute bwrap: {}", e))),
         }
     }
 
@@ -243,14 +282,22 @@ impl Doctor {
             );
         }
 
-        if report.bwrap_available {
+        if report.bwrap_available && report.bwrap_functional {
             println!(
-                " {} bubblewrap detected (transparent /opt path virtualization active)",
+                " {} bubblewrap detected and functional (userns & sandbox isolation active)",
                 apt_prefix("OK")
             );
+        } else if report.bwrap_available {
+            println!(
+                " {} bubblewrap found, but runtime probe (bwrap --ro-bind / / true) failed",
+                apt_prefix("WARN")
+            );
+            if let Some(ref err) = report.bwrap_error {
+                println!("        {}", c(err, &[Colors::YELLOW]));
+            }
         } else {
             println!(
-                " {} bubblewrap not found (hardcoded /opt paths in heavy .deb might require sudo)",
+                " {} bubblewrap not found (hardcoded /opt paths and sandbox profiles require bwrap)",
                 apt_prefix("WARN")
             );
         }
@@ -377,6 +424,8 @@ mod tests {
         assert_eq!(val["installed_packages_count"], 0);
         assert!(val["archive_tools"].is_array());
         assert!(val["fuse"]["libfuse2_available"].is_boolean());
+        assert!(val["bwrap_available"].is_boolean());
+        assert!(val["bwrap_functional"].is_boolean());
         assert!(val["missing_libraries"].is_object());
     }
 }

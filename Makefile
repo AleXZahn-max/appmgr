@@ -33,7 +33,7 @@ install-user: build completions
 	install -m 644 completions/zsh/_appmgr $(USER_PREFIX)/share/zsh/site-functions/_appmgr
 	install -m 644 completions/fish/appmgr.fish $(USER_PREFIX)/share/fish/vendor_completions.d/appmgr.fish
 	if [ -f man/man1/appmgr.1 ]; then install -m 644 man/man1/appmgr.1 $(USER_PREFIX)/share/man/man1/appmgr.1; fi
-	@echo "appmgr v2.4.0 installed successfully to $(USER_PREFIX)/bin/appmgr"
+	@echo "appmgr v2.5.0 installed successfully to $(USER_PREFIX)/bin/appmgr"
 
 install: build completions
 	install -d $(DESTDIR)$(PREFIX)/bin

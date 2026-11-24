@@ -1,4 +1,4 @@
-.TH APPMGR 1 "November 2026" "appmgr 2.4.0" "User Commands"
+.TH APPMGR 1 "November 2026" "appmgr 2.5.0" "User Commands"
 .SH NAME
 appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with Package Registry and GitHub integration
 .SH SYNOPSIS
@@ -6,17 +6,17 @@ appmgr \- Universal application combine for .deb, .AppImage, binary archives (.t
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS...\fR]
 .SH DESCRIPTION
 .B appmgr
-is a hybrid package management combine that brings the aesthetics of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v2 TOML source recipes, direct downloads, HTTP 302 redirects, GitHub Search and Releases APIs, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
+is a hybrid package management combine that brings the aesthetics of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures Bubblewrap sandbox profiles, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v2 TOML source recipes, direct downloads, HTTP 302 redirects, GitHub Search and Releases APIs, multithreaded upgrade checking with release notes preview, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and declarative JSON/TOML manifest export/import diffing.
 .SH COMMANDS
 .TP
-\fBinstall\fR, \fBi\fR \fITARGET...\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR]
+\fBinstall\fR, \fBi\fR \fITARGET...\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR] [\fI--isolate\fR]
 Installs one or more packages with automatic target detection:
 1. If \fITARGET\fR is an existing local file (.deb, .AppImage, .tar.*, .zip, or standalone ELF binary), installs it locally.
 2. If \fITARGET\fR ends with \fB.toml\fR, parses and installs directly from the declarative recipe.
 3. If \fITARGET\fR matches a package ID in active registries, installs according to the recipe's source configuration.
 4. If \fITARGET\fR is a URL, \fBgithub:owner/repo[@tag]\fR, or in \fBowner/repo[@tag]\fR format, installs directly from GitHub Releases.
 5. Otherwise, treats \fITARGET\fR as an application name and searches GitHub repositories, presenting an interactive selection menu.
-Automatically filters assets by host architecture, validates SHA-256 checksums if available, cleans launcher names, sets up desktop integration, and performs automatic 2-tier shared library dependency resolution (host package manager + rootless sandbox pool).
+Automatically filters assets by host architecture, validates SHA-256 checksums if available, cleans launcher names, sets up desktop integration, optionally isolates \fB$HOME\fR via \fI--isolate\fR, and performs automatic 2-tier shared library dependency resolution (host package manager + rootless sandbox pool).
 .TP
 \fBdeps\fR [\fIAPP\fR] [\fI--all\fR] [\fI--fix\fR] [\fI--auto-deps\fR] [\fI--rootless-deps\fR] [\fI--json\fR]
 Inspects or repairs dynamic shared library (.so) dependencies for installed applications.
@@ -42,8 +42,8 @@ Subcommands:
 \fBlink\fR \fIAPP\fR \fIOWNER/REPO\fR
 Links an existing installed application to a GitHub repository to track future releases and updates.
 .TP
-\fBupgrade\fR, \fBup\fR [\fIAPP\fR] [\fI--check\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI--force\fR] [\fI--json\fR] [\fI-y\fR]
-Checks for newer releases across linked repositories and registry recipes using concurrent multithreading and ETag caching. Preserves custom env vars and persistent launch args.
+\fBupgrade\fR, \fBup\fR [\fIAPP\fR] [\fI--check\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI--force\fR] [\fI--notes\fR] [\fI--json\fR] [\fI-y\fR]
+Checks for newer releases across linked repositories, APT sources, and AppImageHub using concurrent multithreading and ETag caching. With \fI--notes\fR, displays a compact cleaned summary of release notes before confirmation. Preserves custom env vars, persistent launch args, and sandbox profiles.
 .TP
 \fBrollback\fR \fIAPP\fR [\fI-y\fR]
 Restores the previous version of an application from the local rollback cache, restoring files, launchers, shortcuts, and metadata.
@@ -57,17 +57,20 @@ Manages custom environment variables for an application and regenerates its laun
 \fBargs\fR \fIAPP\fR [\fIFLAGS ...\fR] [\fI--clear\fR] [\fI--list\fR]
 Configures persistent CLI arguments for an application that are automatically passed on every launch.
 .TP
+\fBsandbox\fR \fIAPP\fR [\fI--profile none|opt-only|isolated-home|offline\fR] [\fI--no-net\fR] [\fI--allow-net\fR] [\fI--home-dir DIR\fR] [\fI--reset\fR]
+Configures Bubblewrap sandbox isolation for an application and regenerates its launcher wrapper.
+.TP
 \fBpin\fR \fIAPP...\fR
 Freezes one or more applications to their current versions, preventing general upgrades from modifying them.
 .TP
 \fBunpin\fR \fIAPP...\fR
 Unfreezes one or more applications, re-enabling automatic updates during upgrade.
 .TP
-\fBexport\fR [\fIFILE.json\fR]
-Exports all installed applications, formats, repository links, env vars, and launch flags into a JSON manifest file.
+\fBexport\fR [\fIFILE.json|FILE.toml\fR]
+Exports active sources and all installed applications (origin, tag, asset pattern, env, args, pin, and sandbox configuration) into a reproducible JSON or TOML manifest.
 .TP
-\fBimport\fR \fIFILE.json\fR [\fI-y\fR]
-Reads a JSON manifest file, installs missing applications from GitHub or registries, and applies their pin, env, and args.
+\fBimport\fR \fIFILE\fR [\fI--diff\fR] [\fI--apply\fR] [\fI-y\fR]
+Computes a declarative sync plan (\fB+ source\fR, \fB+ install\fR, \fB~ update\fR, \fB= keep\fR). Use \fI--diff\fR to preview without applying, or \fI--apply\fR / \fI-y\fR to restore sources, packages, env, args, pins, tags, and sandboxes.
 .TP
 \fBremove\fR, \fBrm\fR, \fBuninstall\fR \fINAME...\fR [\fI-y\fR]
 Uninstalls one or more applications, removing all files, launchers, icons, and desktop entries.
@@ -79,7 +82,7 @@ Displays a table of all managed applications, versions, formats ([DEB], [APPIMAG
 Displays grouped card metadata (Package, Runtime & Paths, Source & Deps) and performs shared library (ldd) dependency verification.
 .TP
 \fBdoctor\fR, \fBcheck\fR [\fI--json\fR]
-Runs a comprehensive system diagnostic: checks archive tools (tar, xz, zstd), FUSE status, Bubblewrap virtualization, PATH integrity, desktop indexers, broken launchers, and static/dynamic binary dependencies.
+Runs a comprehensive system diagnostic: checks archive tools (tar, xz, zstd), FUSE status, Bubblewrap binary and live user namespace probe (\fBbwrap --ro-bind / / true\fR), PATH integrity, desktop indexers, broken launchers, and static/dynamic binary dependencies.
 .TP
 \fBrun\fR \fINAME\fR [\fIARGS...\fR]
 Launches an application with its configured environment and persistent arguments.

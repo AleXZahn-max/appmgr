@@ -9,7 +9,7 @@ use crate::formats::StagingDirGuard;
 use crate::github::{CandidateAsset, GitHubClient, ReleaseAsset};
 use crate::launcher::write_package_launchers;
 use crate::registry::SourceConfigEntry;
-use crate::ui::{apt_prefix, c, confirm_dialog, Colors, Spinner};
+use crate::ui::{apt_prefix, c, confirm_dialog, truncate_with_ellipsis, Colors, Spinner};
 use reqwest::StatusCode;
 use serde_json::json;
 use std::fs;
@@ -27,6 +27,7 @@ enum UpgradeAction {
         asset: CandidateAsset,
         release_assets: Vec<ReleaseAsset>,
         pattern: String,
+        release_notes: Option<String>,
     },
     Apt {
         pkg: PackageRecord,
@@ -44,6 +45,7 @@ enum UpgradeAction {
         asset: CandidateAsset,
         release_assets: Vec<ReleaseAsset>,
         pattern: String,
+        release_notes: Option<String>,
     },
     AppImageHubDirect {
         pkg: PackageRecord,
@@ -52,6 +54,7 @@ enum UpgradeAction {
         download_url: String,
         new_version: String,
         new_etag: Option<String>,
+        description: Option<String>,
     },
 }
 
@@ -95,6 +98,210 @@ impl UpgradeAction {
             Self::AppImageHubDirect { .. } => "appimage".to_string(),
         }
     }
+
+    fn raw_release_notes(&self) -> Option<String> {
+        match self {
+            Self::GitHub { release_notes, .. } | Self::AppImageHubGitHub { release_notes, .. } => {
+                release_notes.clone()
+            }
+            Self::Apt { apt_pkg, .. } => {
+                let mut parts = Vec::new();
+                if let Some(ref desc) = apt_pkg.description {
+                    if !desc.trim().is_empty() {
+                        parts.push(desc.trim().to_string());
+                    }
+                }
+                if let Some(ref hp) = apt_pkg.homepage {
+                    if !hp.trim().is_empty() {
+                        parts.push(format!("Homepage: {}", hp.trim()));
+                    }
+                }
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join("\n"))
+                }
+            }
+            Self::AppImageHubDirect { description, .. } => description.clone(),
+        }
+    }
+}
+
+fn strip_html_comments(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        if let Some(end) = rest[start + 4..].find("-->") {
+            rest = &rest[start + 4 + end + 3..];
+        } else {
+            rest = "";
+            break;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' && in_tag {
+            in_tag = false;
+        } else if !in_tag {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn strip_markdown_links(input: &str) -> String {
+    let mut s = input.to_string();
+    // Drop markdown images ![alt](url)
+    while let Some(img_idx) = s.find("![") {
+        if let Some(mid) = s[img_idx + 2..].find("](") {
+            let after_mid = img_idx + 2 + mid + 2;
+            if let Some(end) = s[after_mid..].find(')') {
+                s.replace_range(img_idx..after_mid + end + 1, "");
+                continue;
+            }
+        }
+        break;
+    }
+    // Convert markdown links [label](url) -> label
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s.as_str();
+    while let Some(start) = rest.find('[') {
+        out.push_str(&rest[..start]);
+        let after_open = &rest[start + 1..];
+        if let Some(mid) = after_open.find("](") {
+            let label = &after_open[..mid];
+            let after_mid = &after_open[mid + 2..];
+            if let Some(end) = after_mid.find(')') {
+                out.push_str(label);
+                rest = &after_mid[end + 1..];
+                continue;
+            }
+        }
+        out.push('[');
+        rest = after_open;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn clean_markdown_line(line: &str) -> Option<(String, bool)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("---")
+        || trimmed.starts_with("***")
+        || trimmed.starts_with("___")
+    {
+        return None;
+    }
+
+    let no_html = strip_html_tags(trimmed);
+    let no_links = strip_markdown_links(&no_html);
+    let mut text = no_links.trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut is_heading = false;
+    if text.starts_with('#') {
+        is_heading = true;
+        text = text.trim_start_matches('#').trim().to_string();
+    }
+
+    if text.starts_with("* ") || text.starts_with("+ ") {
+        text = format!("- {}", text[2..].trim());
+    }
+
+    text = text.replace("**", "").replace("__", "").replace('`', "");
+    let cleaned = text.trim().to_string();
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let lower = cleaned.to_lowercase();
+    if lower.starts_with("full changelog:") || lower == "new contributors" {
+        return None;
+    }
+
+    Some((cleaned, is_heading))
+}
+
+/// Cleans GitHub Markdown / source metadata into a compact terminal-width preview,
+/// prioritizing any Breaking Changes section alongside key initial lines.
+pub fn format_release_notes_preview(raw: &str, max_width: usize, max_lines: usize) -> Vec<String> {
+    if max_lines == 0 || max_width == 0 {
+        return Vec::new();
+    }
+    let no_comments = strip_html_comments(raw);
+    let mut breaking_lines = Vec::new();
+    let mut general_lines = Vec::new();
+    let mut in_breaking = false;
+
+    for raw_line in no_comments.lines() {
+        let Some((cleaned, is_heading)) = clean_markdown_line(raw_line) else {
+            continue;
+        };
+        let lower = cleaned.to_lowercase();
+        let looks_like_breaking_hdr = (is_heading || lower.ends_with(':'))
+            && (lower.contains("breaking") || lower.contains("incompatible"));
+
+        if looks_like_breaking_hdr {
+            in_breaking = true;
+            if breaking_lines.is_empty() {
+                breaking_lines.push("Breaking Changes:".to_string());
+            }
+            continue;
+        }
+        if is_heading {
+            in_breaking = false;
+            general_lines.push(format!("{}:", cleaned.trim_end_matches(':')));
+            continue;
+        }
+
+        if in_breaking {
+            breaking_lines.push(cleaned);
+        } else {
+            general_lines.push(cleaned);
+        }
+    }
+
+    let mut out = Vec::new();
+    let breaking_budget = if !breaking_lines.is_empty() {
+        (max_lines / 2).max(2).min(breaking_lines.len())
+    } else {
+        0
+    };
+    for line in breaking_lines.iter().take(breaking_budget) {
+        out.push(truncate_with_ellipsis(line, max_width));
+    }
+
+    let remaining = max_lines.saturating_sub(out.len());
+    for line in general_lines.iter().take(remaining) {
+        out.push(truncate_with_ellipsis(line, max_width));
+    }
+
+    let total_useful = breaking_lines.len() + general_lines.len();
+    if total_useful > out.len() && !out.is_empty() {
+        let omitted = total_useful - out.len();
+        let hint = format!("... (+{} more line(s))", omitted);
+        if out.len() == max_lines {
+            let last = out.len() - 1;
+            out[last] = truncate_with_ellipsis(&hint, max_width);
+        } else {
+            out.push(truncate_with_ellipsis(&hint, max_width));
+        }
+    }
+
+    out
 }
 
 enum UpgradeCheckResult {
@@ -204,6 +411,7 @@ impl Core {
         prefer: Option<&str>,
         include_pre: bool,
         force: bool,
+        show_notes: bool,
         as_json: bool,
     ) -> Result<bool, String> {
         let target_pkgs: Vec<PackageRecord> = if let Some(q) = app_query {
@@ -438,6 +646,10 @@ impl Core {
             }
         }
 
+        let note_width = terminal_size::terminal_size()
+            .map(|(w, _)| (w.0 as usize).saturating_sub(6).max(30))
+            .unwrap_or(74);
+
         for act in &upgrades {
             let u = act.pkg();
             println!(
@@ -451,6 +663,28 @@ impl Core {
                 ),
                 c(&format!("[{}]", act.source_label()), &[Colors::DIM])
             );
+            if show_notes {
+                match act.raw_release_notes() {
+                    Some(raw) if !raw.trim().is_empty() => {
+                        let preview = format_release_notes_preview(&raw, note_width, 6);
+                        if preview.is_empty() {
+                            println!("      {}", c("(no release notes summary)", &[Colors::DIM]));
+                        } else {
+                            for line in preview {
+                                let style = if line.starts_with("Breaking Changes:") {
+                                    &[Colors::BOLD, Colors::YELLOW][..]
+                                } else {
+                                    &[Colors::DIM][..]
+                                };
+                                println!("      {} {}", c("|", &[Colors::DIM]), c(&line, style));
+                            }
+                        }
+                    }
+                    _ => {
+                        println!("      {}", c("(no release notes provided)", &[Colors::DIM]));
+                    }
+                }
+            }
         }
 
         if check_only {
@@ -598,6 +832,7 @@ impl Core {
                             asset: chosen,
                             release_assets: release.assets,
                             pattern,
+                            release_notes: release.body,
                         }));
                     }
                 }
@@ -712,6 +947,7 @@ impl Core {
                                     asset: chosen,
                                     release_assets: release.assets,
                                     pattern,
+                                    release_notes: release.body,
                                 },
                             ));
                         }
@@ -757,6 +993,7 @@ impl Core {
                                 download_url: url,
                                 new_version: "latest".to_string(),
                                 new_etag,
+                                description: idx_entry.and_then(|e| e.description),
                             },
                         ));
                     }
@@ -981,6 +1218,7 @@ impl Core {
     }
 
     fn preserve_defaults_on_upgrade(&mut self, pkg_id: &str, old_pkg: &PackageRecord) {
+        let mut sbx_home_to_create = None;
         if let Some(rec) = self.db.get_mut(pkg_id) {
             if rec.default_env.is_none() {
                 rec.default_env = old_pkg.default_env.clone();
@@ -988,8 +1226,22 @@ impl Core {
             if rec.default_args.is_none() {
                 rec.default_args = old_pkg.default_args.clone();
             }
+            if let Some(ref sbx) = old_pkg.sandbox {
+                rec.sandbox = Some(sbx.clone());
+                rec.bwrap = old_pkg.bwrap;
+                if sbx.isolates_home() {
+                    sbx_home_to_create = Some(
+                        sbx.home_dir
+                            .clone()
+                            .unwrap_or_else(|| self.config.sandboxes_dir.join(&rec.id)),
+                    );
+                }
+            }
             let _ = write_package_launchers(rec, &self.config.bin_dir);
             let _ = self.db.save();
+        }
+        if let Some(dir) = sbx_home_to_create {
+            let _ = fs::create_dir_all(dir);
         }
     }
 

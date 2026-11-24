@@ -1,6 +1,6 @@
 # Maintainer: Alex Zahn
 pkgname=appmgr
-pkgver=2.4.0
+pkgver=2.5.0
 pkgrel=1
 pkgdesc="Universal Linux Application Combine (.deb, .AppImage, .tar.*, .zip, Standalone ELF)"
 arch=('x86_64' 'aarch64')

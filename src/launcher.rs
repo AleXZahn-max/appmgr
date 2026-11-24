@@ -75,19 +75,6 @@ fn effective_args(record: &PackageRecord) -> Vec<String> {
     merged
 }
 
-fn should_use_bwrap(record: &PackageRecord) -> bool {
-    if record.bwrap == Some(false) {
-        return false;
-    }
-    if record.bwrap == Some(true) {
-        return true;
-    }
-    if record.bind_opt.as_ref().is_some_and(|v| !v.is_empty()) {
-        return true;
-    }
-    record.format == "deb" && record.install_dir.join("opt").exists()
-}
-
 fn collect_opt_mounts(record: &PackageRecord) -> Vec<String> {
     let mut opt_names = BTreeSet::new();
     let opt_dir = record.install_dir.join("opt");
@@ -144,6 +131,165 @@ fn collect_archive_extra_ld(app_dir: &Path) -> String {
     }
 }
 
+fn resolve_sandbox_home_expr(record: &PackageRecord, custom_home: Option<&Path>) -> String {
+    if let Some(custom) = custom_home {
+        return posix_quote(&custom.to_string_lossy());
+    }
+    if let Some(data_dir) = record.install_dir.parent().and_then(|p| p.parent()) {
+        return posix_quote(
+            &data_dir
+                .join("sandboxes")
+                .join(&record.id)
+                .to_string_lossy(),
+        );
+    }
+    format!(
+        "\"${{XDG_DATA_HOME:-$HOME/.local/share}}/appmgr/sandboxes/\"{}",
+        posix_quote(&record.id)
+    )
+}
+
+fn render_isolated_home_bwrap_script(
+    record: &PackageRecord,
+    rel_target: &Path,
+    env_block: &str,
+    args_block: &str,
+    disables_net: bool,
+    custom_home: Option<&Path>,
+) -> String {
+    let pkg_id = &record.id;
+    let app_dir_quoted = posix_quote(&record.install_dir.to_string_lossy());
+    let rel_str = rel_target.to_string_lossy();
+    let rel_quoted = posix_quote(&rel_str);
+    let sandbox_home_expr = resolve_sandbox_home_expr(record, custom_home);
+    let bwrap_mount_block = collect_opt_mounts(record).join("\n");
+    let is_under_opt = rel_str.starts_with("opt/");
+    let container_bin_line = if is_under_opt {
+        format!(
+            "    CONTAINER_BIN={}",
+            posix_quote(&format!("/{}", rel_str))
+        )
+    } else {
+        format!("    CONTAINER_BIN=\"/app/\"{}", rel_quoted)
+    };
+    let extra_ld = if record.install_dir.join("opt").exists() {
+        if let Some(parent) = rel_target.parent() {
+            if !parent.as_os_str().is_empty() {
+                format!(":/app/{}", parent.display())
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let net_block = if disables_net {
+        "    BWRAP_ARGS+=(--unshare-net)".to_string()
+    } else {
+        r#"    REAL_RESOLV="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+    if [ -n "$REAL_RESOLV" ] && [ -e "$REAL_RESOLV" ]; then
+        case "$REAL_RESOLV" in
+            /run/*) BWRAP_ARGS+=(--ro-bind "$REAL_RESOLV" "$REAL_RESOLV") ;;
+        esac
+    fi"#
+        .to_string()
+    };
+
+    let gui_block = if record.is_gui == Some(true) {
+        r#"    RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -e "$RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
+        BWRAP_ARGS+=(--bind "$RUNTIME_DIR/$WAYLAND_DISPLAY" "$RUNTIME_DIR/$WAYLAND_DISPLAY")
+    fi
+    [ -e "$RUNTIME_DIR/pipewire-0" ] && BWRAP_ARGS+=(--bind "$RUNTIME_DIR/pipewire-0" "$RUNTIME_DIR/pipewire-0")
+    [ -e "$RUNTIME_DIR/pulse" ] && BWRAP_ARGS+=(--bind "$RUNTIME_DIR/pulse" "$RUNTIME_DIR/pulse")
+    [ -d /tmp/.X11-unix ] && BWRAP_ARGS+=(--ro-bind /tmp/.X11-unix /tmp/.X11-unix)
+    if [ -n "$ORIG_XAUTH" ] && [ -e "$ORIG_XAUTH" ]; then
+        BWRAP_ARGS+=(--ro-bind "$ORIG_XAUTH" /tmp/.Xauthority --setenv XAUTHORITY /tmp/.Xauthority)
+    fi
+    [ -d /dev/dri ] && BWRAP_ARGS+=(--dev-bind /dev/dri /dev/dri)
+    for gpu_dev in /dev/nvidia* /dev/kfd; do
+        [ -e "$gpu_dev" ] && BWRAP_ARGS+=(--dev-bind "$gpu_dev" "$gpu_dev")
+    done"#
+    } else {
+        ""
+    };
+
+    let appimage_env_line = if record.format == "appimage" {
+        "\n    export APPIMAGE_EXTRACT_AND_RUN=1"
+    } else {
+        ""
+    };
+
+    format!(
+        r#"#!/usr/bin/env bash
+# Sandbox Wrapper created by appmgr for {pkg_id} (profile: isolated-home)
+APP_ROOT={app_dir}
+SANDBOX_HOME={sandbox_home_expr}
+ORIG_XAUTH="${{XAUTHORITY:-$HOME/.Xauthority}}"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_STATE_HOME="$HOME/.local/state"{env_block}
+{args_block}
+if [ "$APPMGR_NO_BWRAP" = "1" ]; then
+    export PATH="$APP_ROOT/bin:$APP_ROOT/usr/bin:$PATH"
+    export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/lib:${{LD_LIBRARY_PATH}}"
+    exec "$APP_ROOT/"{rel_quoted} "${{PERSISTENT_ARGS[@]}}" "$@"
+fi
+
+if ! command -v bwrap >/dev/null 2>&1; then
+    echo "[appmgr] bubblewrap (bwrap) is required for sandboxed execution of '{pkg_id}'." >&2
+    exit 1
+fi
+
+mkdir -p "$SANDBOX_HOME"
+BWRAP_ARGS=(
+    --die-with-parent
+    --unshare-pid
+    --dev /dev
+    --ro-bind /sys /sys
+    --proc /proc
+    --ro-bind /usr /usr
+    --ro-bind /etc /etc
+    --tmpfs /tmp
+    --tmpfs /run
+    --tmpfs /opt
+    --dir /app
+    --ro-bind "$APP_ROOT" /app
+    --bind "$SANDBOX_HOME" "$HOME"
+)
+[ -e /bin ] && BWRAP_ARGS+=(--ro-bind /bin /bin)
+[ -e /lib ] && BWRAP_ARGS+=(--ro-bind /lib /lib)
+[ -e /lib64 ] && BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
+{net_block}
+{gui_block}
+{bwrap_mount_block}
+
+{container_bin_line}{appimage_env_line}
+export PATH="/app/bin:/app/usr/bin:/app:$PATH"
+export LD_LIBRARY_PATH="/app/deps/lib:/app/usr/lib:/app/usr/lib/x86_64-linux-gnu:/app/lib:/app/lib/x86_64-linux-gnu:/app/lib64:/app/usr/lib64:/app/usr/lib/aarch64-linux-gnu:/app/lib/aarch64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
+export XDG_DATA_DIRS="/app/share:/app/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+
+exec bwrap "${{BWRAP_ARGS[@]}}" "$CONTAINER_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
+"#,
+        pkg_id = pkg_id,
+        app_dir = app_dir_quoted,
+        sandbox_home_expr = sandbox_home_expr,
+        rel_quoted = rel_quoted,
+        env_block = env_block,
+        args_block = args_block,
+        net_block = net_block,
+        gui_block = gui_block,
+        bwrap_mount_block = bwrap_mount_block,
+        container_bin_line = container_bin_line,
+        appimage_env_line = appimage_env_line,
+        extra_ld = extra_ld,
+    )
+}
+
 /// Renders a POSIX-safe launcher script declaratively from `PackageRecord`.
 pub fn render_launcher_script(record: &PackageRecord, rel_target: &Path) -> Result<String, String> {
     let env_map = effective_env(record);
@@ -154,6 +300,124 @@ pub fn render_launcher_script(record: &PackageRecord, rel_target: &Path) -> Resu
     let rel_str = rel_target.to_string_lossy();
     let rel_quoted = posix_quote(&rel_str);
     let pkg_id = &record.id;
+    let sbx = record.effective_sandbox();
+
+    if sbx.is_active() {
+        if sbx.isolates_home() {
+            return Ok(render_isolated_home_bwrap_script(
+                record,
+                rel_target,
+                &env_block,
+                &args_block,
+                sbx.disables_net(),
+                sbx.home_dir.as_deref(),
+            ));
+        }
+
+        let bwrap_mount_block = collect_opt_mounts(record).join("\n");
+        let is_under_opt = rel_str.starts_with("opt/");
+        let container_bin_line = if is_under_opt {
+            format!(
+                "    CONTAINER_BIN={}",
+                posix_quote(&format!("/{}", rel_str))
+            )
+        } else {
+            format!("    CONTAINER_BIN=\"$APP_ROOT/\"{}", rel_quoted)
+        };
+        let extra_ld = if record.install_dir.join("opt").exists() {
+            if let Some(parent) = rel_target.parent() {
+                if !parent.as_os_str().is_empty() {
+                    format!(":$APP_ROOT/{}", parent.display())
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        let disables_net = sbx.disables_net();
+        let net_arg_line = if disables_net {
+            "\n    BWRAP_ARGS+=(--unshare-net)"
+        } else {
+            ""
+        };
+        let appimage_env_line = if record.format == "appimage" {
+            "\n    export APPIMAGE_EXTRACT_AND_RUN=1"
+        } else {
+            ""
+        };
+        let missing_bwrap_block = if disables_net {
+            format!(
+                r#"if [ "$APPMGR_NO_BWRAP" != "1" ] && ! command -v bwrap >/dev/null 2>&1; then
+    echo "[appmgr] bubblewrap (bwrap) is required for offline/no-net execution of '{pkg_id}'." >&2
+    exit 1
+fi
+"#
+            )
+        } else {
+            String::new()
+        };
+
+        return Ok(format!(
+            r#"#!/usr/bin/env bash
+# Smart Wrapper created by appmgr for {pkg_id}
+# Handles sandbox virtualization transparently via Bubblewrap user namespaces
+APP_ROOT={app_dir}
+TARGET_BIN="$APP_ROOT/"{rel_quoted}{env_block}
+{args_block}
+{missing_bwrap_block}# 1. Bubblewrap (bwrap) rootless virtualization for hardcoded absolute paths (/opt, /usr/share) and sandbox profiles
+if command -v bwrap >/dev/null 2>&1 && [ "$APPMGR_NO_BWRAP" != "1" ]; then
+    BWRAP_ARGS=(
+        --dev-bind /dev /dev
+        --ro-bind /sys /sys
+        --proc /proc
+        --ro-bind /usr /usr
+        --ro-bind /etc /etc
+        --bind /run /run
+        --bind /tmp /tmp
+        --bind "$HOME" "$HOME"
+        --tmpfs /opt
+    )
+    [ -e /bin ] && BWRAP_ARGS+=(--ro-bind /bin /bin)
+    [ -e /lib ] && BWRAP_ARGS+=(--ro-bind /lib /lib)
+    [ -e /lib64 ] && BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
+    [ -d "$APP_ROOT" ] && BWRAP_ARGS+=(--ro-bind "$APP_ROOT" "$APP_ROOT")
+    if [ -d /opt ]; then
+        for d in /opt/*; do
+            [ -e "$d" ] && BWRAP_ARGS+=(--ro-bind "$d" "$d")
+        done
+    fi{net_arg_line}
+{bwrap_mount_block}
+
+{container_bin_line}{appimage_env_line}
+    export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
+    export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+
+    exec bwrap "${{BWRAP_ARGS[@]}}" "$CONTAINER_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
+fi
+
+# 2. Standard direct execution fallback
+export PATH="$APP_ROOT/usr/bin:$APP_ROOT/bin:$PATH"
+export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
+export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+
+exec "$TARGET_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
+"#,
+            pkg_id = pkg_id,
+            app_dir = app_dir_quoted,
+            rel_quoted = rel_quoted,
+            env_block = env_block,
+            args_block = args_block,
+            missing_bwrap_block = missing_bwrap_block,
+            net_arg_line = net_arg_line,
+            bwrap_mount_block = bwrap_mount_block,
+            container_bin_line = container_bin_line,
+            appimage_env_line = appimage_env_line,
+            extra_ld = extra_ld,
+        ));
+    }
 
     if record.format == "appimage" {
         return Ok(format!(
@@ -184,86 +448,6 @@ exec "$APPIMAGE" "${{PERSISTENT_ARGS[@]}}" "$@"
             rel_quoted = rel_quoted,
             env_block = env_block,
             args_block = args_block,
-        ));
-    }
-
-    if should_use_bwrap(record) {
-        let bwrap_mount_block = collect_opt_mounts(record).join("\n");
-        let is_under_opt = rel_str.starts_with("opt/");
-        let container_bin_line = if is_under_opt {
-            format!(
-                "    CONTAINER_BIN={}",
-                posix_quote(&format!("/{}", rel_str))
-            )
-        } else {
-            format!("    CONTAINER_BIN=\"$APP_ROOT/\"{}", rel_quoted)
-        };
-        let extra_ld = if record.install_dir.join("opt").exists() {
-            if let Some(parent) = rel_target.parent() {
-                if !parent.as_os_str().is_empty() {
-                    format!(":$APP_ROOT/{}", parent.display())
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        return Ok(format!(
-            r#"#!/usr/bin/env bash
-# Smart Wrapper created by appmgr for {pkg_id}
-# Handles hardcoded /opt paths transparently via Bubblewrap user namespaces
-APP_ROOT={app_dir}
-TARGET_BIN="$APP_ROOT/"{rel_quoted}{env_block}
-{args_block}
-# 1. Bubblewrap (bwrap) rootless virtualization for hardcoded absolute paths (/opt, /usr/share)
-if command -v bwrap >/dev/null 2>&1 && [ "$APPMGR_NO_BWRAP" != "1" ]; then
-    BWRAP_ARGS=(
-        --dev-bind /dev /dev
-        --ro-bind /sys /sys
-        --proc /proc
-        --ro-bind /usr /usr
-        --ro-bind /etc /etc
-        --bind /run /run
-        --bind /tmp /tmp
-        --bind "$HOME" "$HOME"
-        --tmpfs /opt
-    )
-    [ -e /bin ] && BWRAP_ARGS+=(--ro-bind /bin /bin)
-    [ -e /lib ] && BWRAP_ARGS+=(--ro-bind /lib /lib)
-    [ -e /lib64 ] && BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
-    if [ -d /opt ]; then
-        for d in /opt/*; do
-            [ -e "$d" ] && BWRAP_ARGS+=(--ro-bind "$d" "$d")
-        done
-    fi
-{bwrap_mount_block}
-
-{container_bin_line}
-    export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
-    export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
-
-    exec bwrap "${{BWRAP_ARGS[@]}}" "$CONTAINER_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
-fi
-
-# 2. Standard direct execution fallback
-export PATH="$APP_ROOT/usr/bin:$APP_ROOT/bin:$PATH"
-export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/usr/lib:$APP_ROOT/usr/lib/x86_64-linux-gnu:$APP_ROOT/lib:$APP_ROOT/lib/x86_64-linux-gnu{extra_ld}:${{LD_LIBRARY_PATH}}"
-export XDG_DATA_DIRS="$APP_ROOT/usr/share:${{XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
-
-exec "$TARGET_BIN" "${{PERSISTENT_ARGS[@]}}" "$@"
-"#,
-            pkg_id = pkg_id,
-            app_dir = app_dir_quoted,
-            rel_quoted = rel_quoted,
-            env_block = env_block,
-            args_block = args_block,
-            bwrap_mount_block = bwrap_mount_block,
-            container_bin_line = container_bin_line,
-            extra_ld = extra_ld,
         ));
     }
 
@@ -595,5 +779,80 @@ mod tests {
         assert!(!cleared.contains("SAFE_VAR"));
         assert!(!cleared.contains("--arg)with)paren"));
         assert!(cleared.contains("PERSISTENT_ARGS=()\n"));
+    }
+
+    #[test]
+    fn test_render_sandbox_profiles_isolated_home_offline_and_gui() {
+        use crate::db::{SandboxConfig, SandboxProfile};
+        let dir = tempdir().unwrap();
+
+        let cli_rec = PackageRecord {
+            id: "clitool".to_string(),
+            name: "clitool".to_string(),
+            version: "1.0.0".to_string(),
+            format: "tar".to_string(),
+            install_dir: dir.path().join("apps/clitool"),
+            entrypoint: Some(PathBuf::from("bin/clitool")),
+            is_gui: Some(false),
+            sandbox: Some(SandboxConfig {
+                profile: SandboxProfile::IsolatedHome,
+                no_net: false,
+                home_dir: None,
+            }),
+            ..Default::default()
+        };
+        let cli_script = render_launcher_script(&cli_rec, Path::new("bin/clitool")).unwrap();
+        let expected_sbx = dir.path().join("sandboxes/clitool");
+        assert!(cli_script.contains(&expected_sbx.to_string_lossy().to_string()));
+        assert!(cli_script.contains("--bind \"$SANDBOX_HOME\" \"$HOME\""));
+        assert!(cli_script.contains("--tmpfs /tmp"));
+        assert!(cli_script.contains("--tmpfs /run"));
+        assert!(cli_script.contains("--ro-bind \"$APP_ROOT\" /app"));
+        assert!(!cli_script.contains("--unshare-net"));
+        assert!(!cli_script.contains("WAYLAND_DISPLAY"));
+        assert!(!cli_script.contains("/tmp/.X11-unix"));
+        assert!(!cli_script.contains("/dev/dri"));
+
+        let gui_rec = PackageRecord {
+            id: "guiapp".to_string(),
+            name: "guiapp".to_string(),
+            version: "1.0.0".to_string(),
+            format: "appimage".to_string(),
+            install_dir: dir.path().join("apps/guiapp"),
+            entrypoint: Some(PathBuf::from("guiapp.AppImage")),
+            is_gui: Some(true),
+            sandbox: Some(SandboxConfig {
+                profile: SandboxProfile::IsolatedHome,
+                no_net: true,
+                home_dir: Some(dir.path().join("custom-sbx")),
+            }),
+            ..Default::default()
+        };
+        let gui_script = render_launcher_script(&gui_rec, Path::new("guiapp.AppImage")).unwrap();
+        assert!(gui_script.contains(&dir.path().join("custom-sbx").to_string_lossy().to_string()));
+        assert!(gui_script.contains("--unshare-net"));
+        assert!(gui_script.contains("WAYLAND_DISPLAY"));
+        assert!(gui_script.contains("pipewire-0"));
+        assert!(gui_script.contains("/tmp/.X11-unix"));
+        assert!(gui_script.contains("/dev/dri"));
+        assert!(gui_script.contains("APPIMAGE_EXTRACT_AND_RUN=1"));
+
+        let offline_rec = PackageRecord {
+            id: "netoff".to_string(),
+            name: "netoff".to_string(),
+            version: "1.0.0".to_string(),
+            format: "bin".to_string(),
+            install_dir: dir.path().join("apps/netoff"),
+            entrypoint: Some(PathBuf::from("bin/netoff")),
+            sandbox: Some(SandboxConfig {
+                profile: SandboxProfile::Offline,
+                no_net: true,
+                home_dir: None,
+            }),
+            ..Default::default()
+        };
+        let offline_script = render_launcher_script(&offline_rec, Path::new("bin/netoff")).unwrap();
+        assert!(offline_script.contains("--unshare-net"));
+        assert!(offline_script.contains("--bind \"$HOME\" \"$HOME\""));
     }
 }

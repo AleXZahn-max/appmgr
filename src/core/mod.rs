@@ -691,7 +691,7 @@ mod tests {
         });
         core.db.add(installed_apt).unwrap();
         assert!(core
-            .upgrade(Some("demo"), true, true, None, false, false, true)
+            .upgrade(Some("demo"), true, true, None, false, false, true, true)
             .await
             .unwrap());
 
@@ -718,5 +718,39 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn test_format_release_notes_preview_cleaning_and_truncation() {
+        let raw_md = r#"<!-- auto-generated -->
+<details><summary>Details</summary></details>
+![badge](https://img.shields.io/badge/build-passing-green)
+
+## What's Changed
+* **Feature**: Added [streaming parser](https://example.com/pr/1) with `zero-copy` mode and very long explanation text that should wrap or truncate cleanly
+* Fix crash on startup
+
+## Breaking Changes
+* Removed deprecated `--legacy-config` flag
+
+**Full Changelog**: https://github.com/owner/repo/compare/v1.0...v2.0
+"#;
+        let preview = crate::core::upgrade::format_release_notes_preview(raw_md, 48, 6);
+        assert!(!preview.is_empty());
+        assert_eq!(preview[0], "Breaking Changes:");
+        assert!(preview[1].contains("Removed deprecated --legacy-config flag"));
+        assert!(!preview.iter().any(|l| l.contains("<!--")));
+        assert!(!preview.iter().any(|l| l.contains("<details>")));
+        assert!(!preview.iter().any(|l| l.contains("https://")));
+        assert!(!preview.iter().any(|l| l.contains("**")));
+        assert!(!preview.iter().any(|l| l.contains("Full Changelog")));
+        for line in &preview {
+            assert!(
+                line.chars().count() <= 48,
+                "Line exceeded width 48: '{}' ({})",
+                line,
+                line.chars().count()
+            );
+        }
     }
 }

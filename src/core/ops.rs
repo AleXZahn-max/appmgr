@@ -1,5 +1,5 @@
 use super::Core;
-use crate::db::{PackageOrigin, PackageRecord};
+use crate::db::{PackageOrigin, PackageRecord, SandboxConfig, SandboxProfile};
 use crate::desktop::run_system_triggers;
 use crate::drivers::appimagehub::{
     get_cached_appimagehub_packages, invalidate_appimagehub_cache, load_cached_appimagehub_count,
@@ -143,7 +143,7 @@ impl Core {
                         format!("{}:{}", chosen.source_id, chosen.package_id)
                     };
                     self.install(
-                        &target, false, false, None, None, false, false, false, false,
+                        &target, false, false, None, None, false, false, false, false, false,
                     )
                     .await?;
                 }
@@ -799,6 +799,192 @@ impl Core {
         Ok(true)
     }
 
+    pub(crate) fn apply_sandbox_config(
+        &mut self,
+        pkg_id: &str,
+        cfg: SandboxConfig,
+    ) -> Result<(), String> {
+        if cfg.isolates_home() {
+            let sbx_home = cfg
+                .home_dir
+                .clone()
+                .unwrap_or_else(|| self.config.sandboxes_dir.join(pkg_id));
+            fs::create_dir_all(&sbx_home).map_err(|e| {
+                format!(
+                    "Failed to create sandbox directory {}: {}",
+                    sbx_home.display(),
+                    e
+                )
+            })?;
+        }
+        let bwrap_flag = if cfg.is_active() {
+            Some(true)
+        } else {
+            Some(false)
+        };
+        self.db
+            .set_sandbox(pkg_id, Some(cfg), bwrap_flag)
+            .map_err(|e| e.to_string())?;
+        if let Some(updated) = self.db.get(pkg_id) {
+            write_package_launchers(updated, &self.config.bin_dir)?;
+        }
+        Ok(())
+    }
+
+    pub fn sandbox_manage(
+        &mut self,
+        app_id: &str,
+        profile: Option<SandboxProfile>,
+        no_net: bool,
+        allow_net: bool,
+        home_dir: Option<PathBuf>,
+        reset: bool,
+    ) -> Result<bool, String> {
+        let pkg = self
+            .db
+            .get(app_id)
+            .ok_or_else(|| format!("Package '{}' is not managed by appmgr.", app_id))?
+            .clone();
+
+        if !reset && profile.is_none() && !no_net && !allow_net && home_dir.is_none() {
+            let eff = pkg.effective_sandbox();
+            println!(
+                "\n{} {}:",
+                c(
+                    "Sandbox configuration for",
+                    &[Colors::BOLD, Colors::BRIGHT_WHITE]
+                ),
+                c(&pkg.name, &[Colors::BOLD, Colors::BRIGHT_CYAN])
+            );
+            println!(
+                "  Profile:   {}",
+                c(&eff.profile.to_string(), &[Colors::BOLD, Colors::YELLOW])
+            );
+            println!(
+                "  Network:   {}",
+                if eff.disables_net() {
+                    "disabled (--unshare-net)"
+                } else {
+                    "enabled (host)"
+                }
+            );
+            if eff.isolates_home() {
+                let home_path = eff
+                    .home_dir
+                    .unwrap_or_else(|| self.config.sandboxes_dir.join(&pkg.id));
+                println!("  Home Dir:  {}", home_path.display());
+            }
+            println!();
+            return Ok(true);
+        }
+
+        if reset {
+            let has_opt = pkg.install_dir.join("opt").exists()
+                || pkg.bind_opt.as_ref().is_some_and(|v| !v.is_empty());
+            let default_bwrap = if has_opt { Some(true) } else { None };
+            self.db
+                .set_sandbox(&pkg.id, None, default_bwrap)
+                .map_err(|e| e.to_string())?;
+            if let Some(updated) = self.db.get(&pkg.id) {
+                write_package_launchers(updated, &self.config.bin_dir)?;
+            }
+            let default_profile = if has_opt {
+                SandboxProfile::OptOnly
+            } else {
+                SandboxProfile::None
+            };
+            println!(
+                " {} Reset sandbox configuration for {} to default ({}).",
+                apt_prefix("OK"),
+                pkg.name,
+                default_profile
+            );
+            return Ok(true);
+        }
+
+        let mut cfg = pkg.effective_sandbox();
+        if let Some(p) = profile {
+            let prev = cfg.profile;
+            cfg.profile = p;
+            match p {
+                SandboxProfile::Offline => {
+                    cfg.no_net = true;
+                }
+                SandboxProfile::None => {
+                    if !no_net {
+                        cfg.no_net = false;
+                    }
+                    if home_dir.is_none() {
+                        cfg.home_dir = None;
+                    }
+                }
+                SandboxProfile::OptOnly => {
+                    if prev == SandboxProfile::Offline && !no_net {
+                        cfg.no_net = false;
+                    }
+                    if home_dir.is_none() {
+                        cfg.home_dir = None;
+                    }
+                }
+                SandboxProfile::IsolatedHome => {
+                    if prev == SandboxProfile::Offline && !no_net {
+                        cfg.no_net = false;
+                    }
+                }
+            }
+        }
+
+        if no_net {
+            cfg.no_net = true;
+        }
+        if allow_net {
+            cfg.no_net = false;
+            if cfg.profile == SandboxProfile::Offline {
+                let has_opt = pkg.install_dir.join("opt").exists()
+                    || pkg.bind_opt.as_ref().is_some_and(|v| !v.is_empty());
+                cfg.profile = if has_opt {
+                    SandboxProfile::OptOnly
+                } else {
+                    SandboxProfile::None
+                };
+            }
+        }
+        if let Some(hd) = home_dir {
+            let abs_hd = if hd.is_absolute() {
+                hd
+            } else {
+                std::env::current_dir()
+                    .map_err(|e| format!("Failed to get current directory: {}", e))?
+                    .join(hd)
+            };
+            cfg.home_dir = Some(abs_hd);
+            if matches!(cfg.profile, SandboxProfile::None | SandboxProfile::OptOnly) {
+                cfg.profile = SandboxProfile::IsolatedHome;
+            }
+        }
+
+        self.apply_sandbox_config(&pkg.id, cfg.clone())?;
+        let net_desc = if cfg.disables_net() { "no-net" } else { "net" };
+        println!(
+            " {} Updated sandbox for {}: profile={}, network={}",
+            apt_prefix("OK"),
+            c(&pkg.name, &[Colors::BOLD, Colors::WHITE]),
+            c(&cfg.profile.to_string(), &[Colors::BOLD, Colors::CYAN]),
+            net_desc
+        );
+        if cfg.isolates_home() {
+            let sbx_home = cfg
+                .home_dir
+                .unwrap_or_else(|| self.config.sandboxes_dir.join(&pkg.id));
+            println!(
+                " {} Sandbox home: {}",
+                apt_prefix("INFO"),
+                c(&sbx_home.display().to_string(), &[Colors::DIM])
+            );
+        }
+        Ok(true)
+    }
+
     pub fn pin_batch(&mut self, apps: &[String]) -> Result<(), String> {
         if apps.len() <= 1 {
             let app = apps
@@ -1094,13 +1280,40 @@ impl Core {
                 colorize,
             ));
         }
-        if pkg.bwrap == Some(true) {
+        let eff_sbx = pkg.effective_sandbox();
+        if eff_sbx.is_active() {
+            let sbx_desc = match eff_sbx.profile {
+                SandboxProfile::OptOnly => {
+                    if eff_sbx.disables_net() {
+                        "opt-only (Bubblewrap /opt, no-net)".to_string()
+                    } else {
+                        "opt-only (Bubblewrap /opt isolated)".to_string()
+                    }
+                }
+                SandboxProfile::IsolatedHome => {
+                    if eff_sbx.disables_net() {
+                        "isolated-home (no-net)".to_string()
+                    } else {
+                        "isolated-home".to_string()
+                    }
+                }
+                SandboxProfile::Offline => "offline (--unshare-net)".to_string(),
+                SandboxProfile::None => "none (no-net)".to_string(),
+            };
             lines.push(format_card_row(
                 "Sandbox:",
                 LABEL_WIDTH,
-                "Bubblewrap (/opt isolated)",
+                &sbx_desc,
                 colorize,
             ));
+            if let Some(ref custom_home) = eff_sbx.home_dir {
+                lines.push(format_card_row(
+                    "Sandbox Home:",
+                    LABEL_WIDTH,
+                    &c_if(colorize, &custom_home.display().to_string(), &[Colors::DIM]),
+                    colorize,
+                ));
+            }
         }
         if !pkg.env.is_empty() {
             let mut pairs: Vec<String> = pkg
@@ -1293,6 +1506,8 @@ impl Core {
             "recipe_id": pkg.recipe_id,
             "source_file": pkg.source_file,
             "bwrap": pkg.bwrap,
+            "sandbox": pkg.sandbox,
+            "effective_sandbox": pkg.effective_sandbox(),
             "binaries": pkg.binaries,
             "secondary_binaries": pkg.secondary_binaries,
             "desktop_files": pkg.desktop_files,
@@ -1778,6 +1993,10 @@ impl Core {
         }
         if pkg.install_dir.exists() {
             let _ = fs::remove_dir_all(&pkg.install_dir);
+        }
+        let sbx_dir = self.config.sandboxes_dir.join(&pkg.id);
+        if sbx_dir.exists() {
+            let _ = fs::remove_dir_all(&sbx_dir);
         }
 
         self.db.remove(&pkg.id).map_err(|e| e.to_string())?;

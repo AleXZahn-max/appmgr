@@ -8,6 +8,50 @@ fn default_user() -> String {
     "user".to_string()
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxProfile {
+    #[default]
+    None,
+    OptOnly,
+    IsolatedHome,
+    Offline,
+}
+
+impl std::fmt::Display for SandboxProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::OptOnly => write!(f, "opt-only"),
+            Self::IsolatedHome => write!(f, "isolated-home"),
+            Self::Offline => write!(f, "offline"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct SandboxConfig {
+    pub profile: SandboxProfile,
+    pub no_net: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_dir: Option<PathBuf>,
+}
+
+impl SandboxConfig {
+    pub fn is_active(&self) -> bool {
+        self.profile != SandboxProfile::None || self.no_net || self.home_dir.is_some()
+    }
+
+    pub fn isolates_home(&self) -> bool {
+        self.profile == SandboxProfile::IsolatedHome || self.home_dir.is_some()
+    }
+
+    pub fn disables_net(&self) -> bool {
+        self.no_net || self.profile == SandboxProfile::Offline
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PackageOrigin {
@@ -272,6 +316,8 @@ pub struct PackageRecord {
     pub bwrap: Option<bool>,
     #[serde(default)]
     pub bind_opt: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxConfig>,
     #[serde(default)]
     pub bundled_deps: Vec<String>,
 }
@@ -338,6 +384,8 @@ struct PackageRecordRaw {
     #[serde(default)]
     bind_opt: Option<Vec<String>>,
     #[serde(default)]
+    sandbox: Option<SandboxConfig>,
+    #[serde(default)]
     bundled_deps: Vec<String>,
 }
 
@@ -389,6 +437,7 @@ impl From<PackageRecordRaw> for PackageRecord {
             default_args: raw.default_args,
             bwrap: raw.bwrap,
             bind_opt: raw.bind_opt,
+            sandbox: raw.sandbox,
             bundled_deps: raw.bundled_deps,
         };
         rec.sync_legacy_from_origin_if_missing();
@@ -442,6 +491,26 @@ fn infer_legacy_origin(
 }
 
 impl PackageRecord {
+    pub fn effective_sandbox(&self) -> SandboxConfig {
+        if let Some(ref sbx) = self.sandbox {
+            return sbx.clone();
+        }
+        let legacy_opt = self.bwrap == Some(true)
+            || self.bind_opt.as_ref().is_some_and(|v| !v.is_empty())
+            || (self.bwrap != Some(false)
+                && self.format == "deb"
+                && self.install_dir.join("opt").exists());
+        if legacy_opt {
+            SandboxConfig {
+                profile: SandboxProfile::OptOnly,
+                no_net: false,
+                home_dir: None,
+            }
+        } else {
+            SandboxConfig::default()
+        }
+    }
+
     pub fn resolved_origin(&self) -> PackageOrigin {
         if !matches!(self.origin, PackageOrigin::Local { .. }) {
             return self.origin.clone();
@@ -617,6 +686,7 @@ impl Default for PackageRecord {
             default_args: None,
             bwrap: None,
             bind_opt: None,
+            sandbox: None,
             bundled_deps: Vec::new(),
         }
     }
@@ -842,6 +912,22 @@ impl Database {
             Ok(false)
         }
     }
+
+    pub fn set_sandbox(
+        &mut self,
+        pkg_id: &str,
+        sandbox: Option<SandboxConfig>,
+        bwrap: Option<bool>,
+    ) -> io::Result<bool> {
+        if let Some(rec) = self.get_mut(pkg_id) {
+            rec.sandbox = sandbox;
+            rec.bwrap = bwrap;
+            self.save()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1031,5 +1117,55 @@ mod tests {
         fs::write(&db_path, "{ newer broken").unwrap();
         let _ = Database::load(&db_path).unwrap_err();
         assert_eq!(fs::read_to_string(&corrupt_path).unwrap(), corrupt_payload);
+    }
+
+    #[test]
+    fn test_sandbox_config_backward_compatibility_and_roundtrip() {
+        let legacy_json = r#"{
+          "legacydeb": {
+            "id": "legacydeb",
+            "name": "legacydeb",
+            "version": "1.0.0",
+            "format": "deb",
+            "install_dir": "/tmp/apps/legacydeb",
+            "bwrap": true,
+            "bind_opt": ["opt/Legacy"]
+          },
+          "sandboxed": {
+            "id": "sandboxed",
+            "name": "sandboxed",
+            "version": "2.0.0",
+            "format": "tar",
+            "install_dir": "/tmp/apps/sandboxed",
+            "sandbox": {
+              "profile": "isolated-home",
+              "no_net": true,
+              "home_dir": "/tmp/custom-home"
+            }
+          }
+        }"#;
+
+        let parsed: HashMap<String, PackageRecord> = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(parsed["legacydeb"].sandbox, None);
+        assert_eq!(
+            parsed["legacydeb"].effective_sandbox(),
+            SandboxConfig {
+                profile: SandboxProfile::OptOnly,
+                no_net: false,
+                home_dir: None,
+            }
+        );
+
+        let sbx = &parsed["sandboxed"];
+        assert_eq!(
+            sbx.effective_sandbox(),
+            SandboxConfig {
+                profile: SandboxProfile::IsolatedHome,
+                no_net: true,
+                home_dir: Some(PathBuf::from("/tmp/custom-home")),
+            }
+        );
+        assert!(sbx.effective_sandbox().isolates_home());
+        assert!(sbx.effective_sandbox().disables_net());
     }
 }

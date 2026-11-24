@@ -1,58 +1,133 @@
 #!/usr/bin/env bash
-# Fast user installer for appmgr (Rust edition)
+# Binary release installer for appmgr (with SHA-256 verification, no Rust required)
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_BIN="$HOME/.local/bin"
-APPMGR_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$SCRIPT_DIR/Cargo.toml" | head -n 1)"
-APPMGR_VERSION="${APPMGR_VERSION:-2.4.0}"
+REPO="AleXZahn-max/appmgr"
+DEFAULT_VERSION="v2.5.0"
+TARGET_BIN="${APPMGR_INSTALL_DIR:-$HOME/.local/bin}"
+DATA_SHARE="$HOME/.local/share"
 
-echo -e "\033[1;36m::\033[0m \033[1;37mBuilding and installing appmgr v${APPMGR_VERSION} (Rust)...\033[0m"
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "[ FAIL ] appmgr only supports Linux hosts." >&2
+    exit 1
+fi
 
-# Ensure Rust/Cargo is available
-if ! command -v cargo &>/dev/null; then
-    if [ -f "$HOME/.cargo/env" ]; then
-        # shellcheck source=/dev/null
-        source "$HOME/.cargo/env"
-    else
-        echo -e "\033[1;31m[ FAIL ]\033[0m Cargo/Rust is not found in PATH or ~/.cargo/env."
-        echo "        Please install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+RAW_ARCH="$(uname -m)"
+case "$RAW_ARCH" in
+    x86_64|amd64) ARCH="x86_64" ;;
+    aarch64|arm64) ARCH="aarch64" ;;
+    *)
+        echo "[ FAIL ] Unsupported architecture: $RAW_ARCH (supported: x86_64, aarch64)." >&2
         exit 1
+        ;;
+esac
+
+download_file() {
+    local url="$1"
+    local dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 "$url" -o "$dest"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$dest" "$url"
+    else
+        echo "[ FAIL ] Neither curl nor wget is installed." >&2
+        exit 1
+    fi
+}
+
+compute_sha256() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print tolower($1)}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print tolower($1)}'
+    else
+        echo "[ FAIL ] sha256sum (or shasum) is required for checksum verification." >&2
+        exit 1
+    fi
+}
+
+VERSION="${APPMGR_VERSION:-$DEFAULT_VERSION}"
+if [ "$VERSION" = "latest" ]; then
+    if command -v curl >/dev/null 2>&1; then
+        RESOLVED="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" || true)"
+        TAG_PART="${RESOLVED##*/}"
+        if [ -n "$TAG_PART" ] && [ "$TAG_PART" != "latest" ]; then
+            VERSION="$TAG_PART"
+        else
+            VERSION="$DEFAULT_VERSION"
+        fi
+    else
+        VERSION="$DEFAULT_VERSION"
     fi
 fi
 
-cd "$SCRIPT_DIR"
-cargo build --release --locked
+case "$VERSION" in
+    v*) TAG="$VERSION" ;;
+    *) TAG="v$VERSION" ;;
+esac
 
-mkdir -p "$TARGET_BIN"
-mkdir -p "$HOME/.local/share/bash-completion/completions"
-mkdir -p "$HOME/.local/share/zsh/site-functions"
-mkdir -p "$HOME/.local/share/fish/vendor_completions.d"
-mkdir -p "$HOME/.local/share/man/man1"
+ARCHIVE_NAME="appmgr-${TAG}-${ARCH}-linux.tar.gz"
+BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+ARCHIVE_URL="${BASE_URL}/${ARCHIVE_NAME}"
+CHECKSUMS_URL="${BASE_URL}/SHA256SUMS"
 
-install -m 755 target/release/appmgr "$TARGET_BIN/appmgr"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
-# Generate and install completions directly from the compiled binary
-target/release/appmgr completions bash > "$HOME/.local/share/bash-completion/completions/appmgr" 2>/dev/null || true
-target/release/appmgr completions zsh > "$HOME/.local/share/zsh/site-functions/_appmgr" 2>/dev/null || true
-target/release/appmgr completions fish > "$HOME/.local/share/fish/vendor_completions.d/appmgr.fish" 2>/dev/null || true
+echo ":: Installing appmgr ${TAG} (${ARCH}-linux) from GitHub Releases..."
+download_file "$CHECKSUMS_URL" "$TMP_DIR/SHA256SUMS"
+download_file "$ARCHIVE_URL" "$TMP_DIR/$ARCHIVE_NAME"
 
-if [ -f "$SCRIPT_DIR/man/man1/appmgr.1" ]; then
-    cp "$SCRIPT_DIR/man/man1/appmgr.1" "$HOME/.local/share/man/man1/appmgr.1" 2>/dev/null || true
+EXPECTED_SHA="$(awk -v target="$ARCHIVE_NAME" '$2 == target || $2 == ("./" target) || $2 == ("*" target) {print tolower($1); exit}' "$TMP_DIR/SHA256SUMS")"
+if [ -z "$EXPECTED_SHA" ]; then
+    echo "[ FAIL ] Checksum entry for ${ARCHIVE_NAME} not found in SHA256SUMS." >&2
+    exit 1
 fi
 
-# Ensure ~/.local/bin is in PATH without duplicates
-BIN_DIR="$HOME/.local/bin"
+ACTUAL_SHA="$(compute_sha256 "$TMP_DIR/$ARCHIVE_NAME")"
+if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+    echo "[ FAIL ] SHA-256 verification failed for ${ARCHIVE_NAME}!" >&2
+    echo "        Expected: $EXPECTED_SHA" >&2
+    echo "        Computed: $ACTUAL_SHA" >&2
+    exit 1
+fi
+echo "[ OK ] SHA-256 verified (${ACTUAL_SHA:0:12}...)"
+
+tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$TMP_DIR"
+EXTRACTED_DIR="$TMP_DIR/appmgr-${TAG}-${ARCH}-linux"
+if [ ! -f "$EXTRACTED_DIR/appmgr" ]; then
+    echo "[ FAIL ] Extracted archive missing appmgr binary." >&2
+    exit 1
+fi
+
+mkdir -p "$TARGET_BIN"
+mkdir -p "$DATA_SHARE/bash-completion/completions"
+mkdir -p "$DATA_SHARE/zsh/site-functions"
+mkdir -p "$DATA_SHARE/fish/vendor_completions.d"
+mkdir -p "$DATA_SHARE/man/man1"
+
+install -m 755 "$EXTRACTED_DIR/appmgr" "$TARGET_BIN/appmgr"
+
+"$TARGET_BIN/appmgr" completions bash > "$DATA_SHARE/bash-completion/completions/appmgr" 2>/dev/null || true
+"$TARGET_BIN/appmgr" completions zsh > "$DATA_SHARE/zsh/site-functions/_appmgr" 2>/dev/null || true
+"$TARGET_BIN/appmgr" completions fish > "$DATA_SHARE/fish/vendor_completions.d/appmgr.fish" 2>/dev/null || true
+
+if [ -f "$EXTRACTED_DIR/appmgr.1" ]; then
+    install -m 644 "$EXTRACTED_DIR/appmgr.1" "$DATA_SHARE/man/man1/appmgr.1" 2>/dev/null || true
+elif [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/man/man1/appmgr.1" ]; then
+    install -m 644 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/man/man1/appmgr.1" "$DATA_SHARE/man/man1/appmgr.1" 2>/dev/null || true
+fi
+
 for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$RC" ]; then
         if ! grep -q 'PATH=.*\.local/bin' "$RC" 2>/dev/null; then
-            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$RC"
+            echo "export PATH=\"$TARGET_BIN:\$PATH\"" >> "$RC"
         fi
     fi
 done
 
-echo -e "\033[1;32m[  OK  ]\033[0m appmgr v${APPMGR_VERSION} binary installed to: \033[1;33m$TARGET_BIN/appmgr\033[0m"
-echo -e "\033[1;32m[  OK  ]\033[0m Shell completions (bash, zsh, fish) generated and installed."
-echo
-echo -e "\033[1;36m::\033[0m Test the installation with: \033[1;32mappmgr --version\033[0m or \033[1;32mappmgr doctor\033[0m"
+echo "[ OK ] appmgr ${TAG} installed to: $TARGET_BIN/appmgr"
+echo "[ OK ] Shell completions (bash, zsh, fish) installed."
+echo ":: Test with: appmgr --version && appmgr doctor"

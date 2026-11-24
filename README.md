@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.4.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.4.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.5.0 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Fetching release metadata from GitHub: aristocratos/btop                           │
 │                                                                                        │
@@ -65,8 +65,8 @@ AppMgr marries the best visual and operational paradigms of two iconic package m
 2. **Zero System Package Manager Conflicts**:
    Applications reside in dedicated rootless directories (`~/.local/share/appmgr/apps/<name>/` or `/opt/appmgr/apps/<name>/` in system mode). Your base system package database remains untouched and pristine.
 
-3. **Transparent `/opt/` Virtualization via Bubblewrap (`bwrap`)**:
-   Heavier proprietary `.deb` packages (e.g., Discord, VS Code, Google Chrome) often hardcode absolute file paths to `/opt/appname/` or `/usr/share/`. AppMgr automatically generates a sandbox wrapper that mounts those directories into an unprivileged user namespace, allowing complex binaries to run out of the box without root privileges.
+3. **Bubblewrap Sandbox Profiles & `/opt/` Virtualization (`bwrap`)**:
+   Heavier proprietary `.deb` packages (e.g., Discord, VS Code, Google Chrome) often hardcode absolute file paths to `/opt/appname/` or `/usr/share/`, and any application can be isolated using `appmgr install --isolate` or `appmgr sandbox <app>` (`none`, `opt-only`, `isolated-home`, `offline`, `--no-net`, `--home-dir`). GUI apps retain Wayland/X11/PipeWire/GPU passthrough while keeping real `$HOME` hidden.
 
 4. **Smart CLI vs GUI Desktop Integration**:
    AppMgr inspects binaries with `goblin` for GUI toolkit linkages (`libX11`, `libwayland`, `libgtk`, `libQt`, `libSDL`, `libGL`).
@@ -138,8 +138,12 @@ sudo dnf install bubblewrap tar xz zstd desktop-file-utils fuse
 
 ## Installation & Building
 
-### Option 1: Fast User Installation (Recommended)
-Builds and installs AppMgr into `~/.local/bin` (no root/sudo required):
+### Option 1: Fast Binary Release Installation (Recommended, No Rust Required)
+Downloads the prebuilt release archive from GitHub Releases, verifies SHA-256 against `SHA256SUMS`, and installs `appmgr` + shell completions into `~/.local/bin`:
+```bash
+curl -fsSL https://raw.githubusercontent.com/AleXZahn-max/appmgr/main/install.sh | bash
+```
+Or clone and run locally (override version via `APPMGR_VERSION=v2.5.0`):
 ```bash
 git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr
@@ -257,8 +261,28 @@ appmgr install spotify-client --auto-deps     # Auto-install host packages witho
 appmgr install discord --rootless-deps       # Force rootless sandbox dependency isolation
 appmgr install btop --no-deps               # Skip dependency checking
 
+# Enable isolated $HOME Bubblewrap sandbox at install time:
+appmgr install owner/repo --isolate
+
 # Non-interactive mode (assumes yes):
 appmgr install apt-gh:gh -y
+```
+
+### 6. Sandbox Isolation Profiles (`sandbox`)
+Configure per-application Bubblewrap sandboxing (`none`, `opt-only`, `isolated-home`, `offline`):
+```bash
+# View current sandbox configuration:
+appmgr sandbox obsidian
+
+# Isolate $HOME into ~/.local/share/appmgr/sandboxes/<id> and disable network:
+appmgr sandbox obsidian --profile isolated-home --no-net
+
+# Offline sandbox with a custom home directory:
+appmgr sandbox demo --profile offline --home-dir ~/Sandboxes/demo
+
+# Re-enable network or reset to package defaults:
+appmgr sandbox obsidian --allow-net
+appmgr sandbox obsidian --reset
 ```
 
 ### 6. Linking Applications to GitHub (`link`)
@@ -322,6 +346,9 @@ appmgr unpin btop
 # Multi-threaded async check for updates without installing:
 appmgr upgrade --check
 
+# Check updates with compact release notes preview (prioritizing breaking changes):
+appmgr upgrade --notes
+
 # Machine-readable JSON output for status bars and scripts:
 appmgr upgrade --check --json
 
@@ -341,13 +368,18 @@ appmgr rollback btop
 appmgr clean -y
 ```
 
-### 13. Exporting & Importing Application Manifests (`export` / `import`)
+### 13. Declarative Sync Manifests (`export` / `import --diff`)
 ```bash
-# Export all installed applications and configurations:
+# Export active sources, packages, origins, tags, env, args, pins, and sandbox profiles:
 appmgr export my-apps.json
+# Or export as TOML:
+appmgr export my-apps.toml
 
-# Restore all applications on a fresh machine:
-appmgr import my-apps.json -y
+# Preview declarative change plan (+ source, + install, ~ update, = keep) without modifying state:
+appmgr import my-apps.json --diff
+
+# Apply the manifest plan (or restore on a fresh machine):
+appmgr import my-apps.json --apply -y
 ```
 
 ### 14. Shared Library Diagnostics & Repair (`deps`)

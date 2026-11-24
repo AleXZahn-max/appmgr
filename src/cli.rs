@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -119,6 +120,12 @@ pub enum Commands {
             help = "Bundle missing libraries into local sandbox (no sudo)"
         )]
         rootless_deps: bool,
+
+        #[arg(
+            long = "isolate",
+            help = "Isolate application home directory inside a Bubblewrap sandbox"
+        )]
+        isolate: bool,
     },
 
     #[command(
@@ -241,6 +248,12 @@ pub enum Commands {
         #[arg(long = "pre", help = "Include pre-releases in update check")]
         pre: bool,
 
+        #[arg(
+            long = "notes",
+            help = "Show compact release notes preview before confirming upgrade"
+        )]
+        notes: bool,
+
         #[arg(long = "json", help = "Output machine-readable JSON")]
         json: bool,
     },
@@ -346,6 +359,38 @@ pub enum Commands {
         list: bool,
     },
 
+    #[command(about = "Configure Bubblewrap sandbox isolation profile for an application")]
+    Sandbox {
+        #[arg(help = "Application name or ID")]
+        app: String,
+
+        #[arg(long = "profile", value_enum, help = "Sandbox isolation profile")]
+        profile: Option<SandboxProfileArg>,
+
+        #[arg(
+            long = "no-net",
+            conflicts_with = "allow_net",
+            help = "Disable network access inside sandbox (--unshare-net)"
+        )]
+        no_net: bool,
+
+        #[arg(
+            long = "allow-net",
+            conflicts_with = "no_net",
+            help = "Allow network access inside sandbox"
+        )]
+        allow_net: bool,
+
+        #[arg(
+            long = "home-dir",
+            help = "Custom directory mounted as $HOME inside sandbox"
+        )]
+        home_dir: Option<PathBuf>,
+
+        #[arg(long = "reset", help = "Reset sandbox settings to package default")]
+        reset: bool,
+    },
+
     #[command(about = "Freeze application version(s) to skip general upgrades")]
     Pin {
         #[arg(required = true, num_args = 1.., help = "Application names or IDs")]
@@ -383,16 +428,25 @@ pub enum Commands {
         yes: bool,
     },
 
-    #[command(about = "Export installed applications to a JSON manifest")]
+    #[command(about = "Export installed applications and sources to a manifest (JSON/TOML)")]
     Export {
         #[arg(help = "Destination file (default: appmgr-manifest.json)")]
         file: Option<String>,
     },
 
-    #[command(about = "Install applications from a JSON manifest")]
+    #[command(about = "Sync sources and applications from a manifest (JSON/TOML)")]
     Import {
-        #[arg(help = "Path to manifest JSON file")]
+        #[arg(help = "Path to manifest file (JSON or TOML)")]
         file: String,
+
+        #[arg(
+            long = "diff",
+            help = "Preview declarative change plan without modifying the system"
+        )]
+        diff: bool,
+
+        #[arg(long = "apply", help = "Apply manifest changes after preview")]
+        apply: bool,
 
         #[arg(
             short = 'y',
@@ -523,6 +577,25 @@ pub enum PkgCommands {
         #[arg(long = "dry-run", help = "Emulate checks without network requests")]
         dry_run: bool,
     },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SandboxProfileArg {
+    None,
+    OptOnly,
+    IsolatedHome,
+    Offline,
+}
+
+impl From<SandboxProfileArg> for crate::db::SandboxProfile {
+    fn from(value: SandboxProfileArg) -> Self {
+        match value {
+            SandboxProfileArg::None => crate::db::SandboxProfile::None,
+            SandboxProfileArg::OptOnly => crate::db::SandboxProfile::OptOnly,
+            SandboxProfileArg::IsolatedHome => crate::db::SandboxProfile::IsolatedHome,
+            SandboxProfileArg::Offline => crate::db::SandboxProfile::Offline,
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

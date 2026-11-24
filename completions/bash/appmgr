@@ -70,6 +70,9 @@ _appmgr() {
             appmgr,run)
                 cmd="appmgr__subcmd__run"
                 ;;
+            appmgr,sandbox)
+                cmd="appmgr__subcmd__sandbox"
+                ;;
             appmgr,search)
                 cmd="appmgr__subcmd__search"
                 ;;
@@ -144,6 +147,9 @@ _appmgr() {
                 ;;
             appmgr__subcmd__help,run)
                 cmd="appmgr__subcmd__help__subcmd__run"
+                ;;
+            appmgr__subcmd__help,sandbox)
+                cmd="appmgr__subcmd__help__subcmd__sandbox"
                 ;;
             appmgr__subcmd__help,search)
                 cmd="appmgr__subcmd__help__subcmd__search"
@@ -284,7 +290,7 @@ _appmgr() {
 
     case "${cmd}" in
         appmgr)
-            opts="-y -h -V --yes --system --user --color --help --version install search update source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="-y -h -V --yes --system --user --color --help --version install search update source deps pkg link upgrade remove list info doctor run env args sandbox pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -432,7 +438,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__help)
-            opts="install search update source deps pkg link upgrade remove list info doctor run env args pin unpin rollback clean export import update-db self-update completions help"
+            opts="install search update source deps pkg link upgrade remove list info doctor run env args sandbox pin unpin rollback clean export import update-db self-update completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -739,6 +745,20 @@ _appmgr() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        appmgr__subcmd__help__subcmd__sandbox)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         appmgr__subcmd__help__subcmd__search)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -950,7 +970,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__import)
-            opts="-y -h --yes --system --user --color --help"
+            opts="-y -h --diff --apply --yes --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -986,7 +1006,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__install)
-            opts="-f -y -h --force --yes --repo --prefer --pre --auto-deps --no-deps --rootless-deps --system --user --color --help"
+            opts="-f -y -h --force --yes --repo --prefer --pre --auto-deps --no-deps --rootless-deps --isolate --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1266,6 +1286,32 @@ _appmgr() {
                 return 0
             fi
             case "${prev}" in
+                --color)
+                    COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        appmgr__subcmd__sandbox)
+            opts="-y -h --profile --no-net --allow-net --home-dir --reset --yes --system --user --color --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --profile)
+                    COMPREPLY=($(compgen -W "none opt-only isolated-home offline" -- "${cur}"))
+                    return 0
+                    ;;
+                --home-dir)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --color)
                     COMPREPLY=($(compgen -W "auto always never" -- "${cur}"))
                     return 0
@@ -1698,7 +1744,7 @@ _appmgr() {
             return 0
             ;;
         appmgr__subcmd__upgrade)
-            opts="-c -y -f -h --check --yes --force --prefer --pre --json --system --user --color --help"
+            opts="-c -y -f -h --check --yes --force --prefer --pre --notes --json --system --user --color --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

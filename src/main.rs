@@ -113,6 +113,7 @@ async fn main() {
             auto_deps,
             no_deps,
             rootless_deps,
+            isolate,
         } => {
             core.install_batch(
                 &packages,
@@ -124,6 +125,7 @@ async fn main() {
                 auto_deps,
                 no_deps,
                 rootless_deps,
+                isolate,
             )
             .await
         }
@@ -159,6 +161,7 @@ async fn main() {
             force,
             prefer,
             pre,
+            notes,
             json,
         } => core
             .upgrade(
@@ -168,6 +171,7 @@ async fn main() {
                 prefer.map(|p| p.as_str()),
                 pre,
                 force,
+                notes,
                 json,
             )
             .await
@@ -194,13 +198,35 @@ async fn main() {
             clear,
             list,
         } => core.args_manage(&app, &cli_args, clear, list).map(|_| ()),
+        Commands::Sandbox {
+            app,
+            profile,
+            no_net,
+            allow_net,
+            home_dir,
+            reset,
+        } => core
+            .sandbox_manage(
+                &app,
+                profile.map(Into::into),
+                no_net,
+                allow_net,
+                home_dir,
+                reset,
+            )
+            .map(|_| ()),
         Commands::Pin { apps } => core.pin_batch(&apps),
         Commands::Unpin { apps } => core.unpin_batch(&apps),
         Commands::Rollback { app, yes } => core.rollback(&app, yes || global_yes).map(|_| ()),
         Commands::Clean { yes } => core.clean(yes || global_yes).map(|_| ()),
         Commands::Export { file } => core.export_manifest(file.as_deref()).map(|_| ()),
-        Commands::Import { file, yes } => core
-            .import_manifest(&file, yes || global_yes)
+        Commands::Import {
+            file,
+            diff,
+            apply,
+            yes,
+        } => core
+            .import_manifest(&file, diff, apply, yes || global_yes)
             .await
             .map(|_| ()),
         Commands::UpdateDb => {

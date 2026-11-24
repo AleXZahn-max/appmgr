@@ -32,6 +32,8 @@ pub struct Release {
     #[serde(default)]
     pub prerelease: bool,
     #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
     pub assets: Vec<ReleaseAsset>,
 }
 

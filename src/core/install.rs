@@ -1,6 +1,6 @@
 use super::Core;
 use crate::config::DepsMode;
-use crate::db::PackageOrigin;
+use crate::db::{PackageOrigin, SandboxConfig, SandboxProfile};
 use crate::desktop::run_system_triggers;
 use crate::drivers::appimagehub::get_cached_appimagehub_packages;
 use crate::drivers::apt::get_cached_apt_packages;
@@ -31,6 +31,7 @@ impl Core {
         auto_deps: bool,
         no_deps: bool,
         rootless_deps: bool,
+        isolate: bool,
     ) -> Result<(), String> {
         if packages.len() <= 1 {
             let pkg = packages
@@ -47,6 +48,7 @@ impl Core {
                     auto_deps,
                     no_deps,
                     rootless_deps,
+                    isolate,
                 )
                 .await
                 .map(|_| ());
@@ -80,6 +82,7 @@ impl Core {
                     auto_deps,
                     no_deps,
                     rootless_deps,
+                    isolate,
                 )
                 .await
             {
@@ -95,6 +98,38 @@ impl Core {
         Self::print_batch_summary("install", &succeeded, &skipped, &failed)
     }
 
+    async fn finalize_installed(
+        &mut self,
+        installed_id: Option<String>,
+        isolate: bool,
+        auto_deps: bool,
+        no_deps: bool,
+        rootless_deps: bool,
+    ) -> Result<bool, String> {
+        let Some(ref id) = installed_id else {
+            return Ok(false);
+        };
+        if isolate {
+            self.apply_sandbox_config(
+                id,
+                SandboxConfig {
+                    profile: SandboxProfile::IsolatedHome,
+                    no_net: false,
+                    home_dir: None,
+                },
+            )?;
+            let sbx_path = self.config.sandboxes_dir.join(id);
+            println!(
+                " {} Sandbox isolation enabled (isolated-home: {})",
+                apt_prefix("OK"),
+                c(&sbx_path.display().to_string(), &[Colors::DIM])
+            );
+        }
+        self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps)
+            .await?;
+        Ok(true)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         &mut self,
@@ -107,6 +142,7 @@ impl Core {
         auto_deps: bool,
         no_deps: bool,
         rootless_deps: bool,
+        isolate: bool,
     ) -> Result<bool, String> {
         let effective_prefer: Option<String> = prefer
             .map(String::from)
@@ -130,12 +166,9 @@ impl Core {
             let res = self.install_local_file(
                 local_path, force, assume_yes, repo, None, None, None, None, None, false, None,
             )?;
-            if let Some(ref id) = res {
-                self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps)
-                    .await?;
-                return Ok(true);
-            }
-            return Ok(false);
+            return self
+                .finalize_installed(res, isolate, auto_deps, no_deps, rootless_deps)
+                .await;
         }
 
         let effective_sources = crate::registry::get_effective_sources(
@@ -185,17 +218,15 @@ impl Core {
                                     let res = self
                                         .install_from_apt_source(src, p, force, assume_yes)
                                         .await?;
-                                    if let Some(ref id) = res {
-                                        self.resolve_package_dependencies(
-                                            id,
+                                    return self
+                                        .finalize_installed(
+                                            res,
+                                            isolate,
                                             auto_deps,
                                             no_deps,
                                             rootless_deps,
                                         )
-                                        .await?;
-                                        return Ok(true);
-                                    }
-                                    return Ok(false);
+                                        .await;
                                 }
                             }
                             "appimagehub" => {
@@ -211,17 +242,15 @@ impl Core {
                                     let res = self
                                         .install_from_appimagehub(src, p, force, assume_yes)
                                         .await?;
-                                    if let Some(ref id) = res {
-                                        self.resolve_package_dependencies(
-                                            id,
+                                    return self
+                                        .finalize_installed(
+                                            res,
+                                            isolate,
                                             auto_deps,
                                             no_deps,
                                             rootless_deps,
                                         )
-                                        .await?;
-                                        return Ok(true);
-                                    }
-                                    return Ok(false);
+                                        .await;
                                 }
                             }
                             _ => {}
@@ -254,12 +283,9 @@ impl Core {
                     include_pre,
                 )
                 .await?;
-            if let Some(ref id) = res {
-                self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps)
-                    .await?;
-                return Ok(true);
-            }
-            return Ok(false);
+            return self
+                .finalize_installed(res, isolate, auto_deps, no_deps, rootless_deps)
+                .await;
         }
 
         // Search local indexed packages (APT, AppImageHub) by priority
@@ -278,17 +304,9 @@ impl Core {
                         let res = self
                             .install_from_apt_source(src, p, force, assume_yes)
                             .await?;
-                        if let Some(ref id) = res {
-                            self.resolve_package_dependencies(
-                                id,
-                                auto_deps,
-                                no_deps,
-                                rootless_deps,
-                            )
-                            .await?;
-                            return Ok(true);
-                        }
-                        return Ok(false);
+                        return self
+                            .finalize_installed(res, isolate, auto_deps, no_deps, rootless_deps)
+                            .await;
                     }
                 }
                 "appimagehub" => {
@@ -304,17 +322,9 @@ impl Core {
                         let res = self
                             .install_from_appimagehub(src, p, force, assume_yes)
                             .await?;
-                        if let Some(ref id) = res {
-                            self.resolve_package_dependencies(
-                                id,
-                                auto_deps,
-                                no_deps,
-                                rootless_deps,
-                            )
-                            .await?;
-                            return Ok(true);
-                        }
-                        return Ok(false);
+                        return self
+                            .finalize_installed(res, isolate, auto_deps, no_deps, rootless_deps)
+                            .await;
                     }
                 }
                 _ => {}
@@ -347,12 +357,8 @@ impl Core {
                 include_pre,
             )
             .await?;
-        if let Some(ref id) = res {
-            self.resolve_package_dependencies(id, auto_deps, no_deps, rootless_deps)
-                .await?;
-            return Ok(true);
-        }
-        Ok(false)
+        self.finalize_installed(res, isolate, auto_deps, no_deps, rootless_deps)
+            .await
     }
 
     pub async fn install_from_github(

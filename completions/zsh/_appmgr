@@ -46,6 +46,7 @@ _arguments "${_arguments_options[@]}" : \
 '--auto-deps[Automatically install missing host dependencies]' \
 '--no-deps[Skip dynamic dependency check and resolution]' \
 '--rootless-deps[Bundle missing libraries into local sandbox (no sudo)]' \
+'--isolate[Isolate application home directory inside a Bubblewrap sandbox]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
@@ -394,6 +395,7 @@ _arguments "${_arguments_options[@]}" : \
 '-f[Force upgrade even if pinned]' \
 '--force[Force upgrade even if pinned]' \
 '--pre[Include pre-releases in update check]' \
+'--notes[Show compact release notes preview before confirming upgrade]' \
 '--json[Output machine-readable JSON]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
@@ -496,6 +498,23 @@ _arguments "${_arguments_options[@]}" : \
 '*::cli_args -- Persistent flags to pass:_default' \
 && ret=0
 ;;
+(sandbox)
+_arguments "${_arguments_options[@]}" : \
+'--profile=[Sandbox isolation profile]:PROFILE:(none opt-only isolated-home offline)' \
+'--home-dir=[Custom directory mounted as \$HOME inside sandbox]:HOME_DIR:_files' \
+'--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'(--allow-net)--no-net[Disable network access inside sandbox (--unshare-net)]' \
+'(--no-net)--allow-net[Allow network access inside sandbox]' \
+'--reset[Reset sandbox settings to package default]' \
+'-y[Automatic yes to prompts]' \
+'--yes[Automatic yes to prompts]' \
+'--system[Force system-wide installation mode (/opt, /usr/local)]' \
+'--user[Force user-level rootless mode (~/.local)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':app -- Application name or ID:_default' \
+&& ret=0
+;;
 (pin)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
@@ -558,13 +577,15 @@ _arguments "${_arguments_options[@]}" : \
 (import)
 _arguments "${_arguments_options[@]}" : \
 '--color=[Colorize output (auto, always, never)]:COLOR:(auto always never)' \
+'--diff[Preview declarative change plan without modifying the system]' \
+'--apply[Apply manifest changes after preview]' \
 '-y[Assume yes to all prompts]' \
 '--yes[Assume yes to all prompts]' \
 '--system[Force system-wide installation mode (/opt, /usr/local)]' \
 '--user[Force user-level rootless mode (~/.local)]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':file -- Path to manifest JSON file:_default' \
+':file -- Path to manifest file (JSON or TOML):_default' \
 && ret=0
 ;;
 (update-db)
@@ -744,6 +765,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(sandbox)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (pin)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -811,12 +836,13 @@ _appmgr_commands() {
 'run:Launch an installed application' \
 'env:Manage custom environment variables for an application' \
 'args:Manage persistent launch flags for an application' \
+'sandbox:Configure Bubblewrap sandbox isolation profile for an application' \
 'pin:Freeze application version(s) to skip general upgrades' \
 'unpin:Unfreeze application version(s) to allow updates' \
 'rollback:Restore previous version of an application from cache' \
 'clean:Clean rollback backups and temporary cache' \
-'export:Export installed applications to a JSON manifest' \
-'import:Install applications from a JSON manifest' \
+'export:Export installed applications and sources to a manifest (JSON/TOML)' \
+'import:Sync sources and applications from a manifest (JSON/TOML)' \
 'update-db:Refresh desktop database and icon theme caches' \
 'self-update:Update appmgr itself to the latest version' \
 'completions:Generate shell completions (bash, zsh, fish)' \
@@ -877,12 +903,13 @@ _appmgr__subcmd__help_commands() {
 'run:Launch an installed application' \
 'env:Manage custom environment variables for an application' \
 'args:Manage persistent launch flags for an application' \
+'sandbox:Configure Bubblewrap sandbox isolation profile for an application' \
 'pin:Freeze application version(s) to skip general upgrades' \
 'unpin:Unfreeze application version(s) to allow updates' \
 'rollback:Restore previous version of an application from cache' \
 'clean:Clean rollback backups and temporary cache' \
-'export:Export installed applications to a JSON manifest' \
-'import:Install applications from a JSON manifest' \
+'export:Export installed applications and sources to a manifest (JSON/TOML)' \
+'import:Sync sources and applications from a manifest (JSON/TOML)' \
 'update-db:Refresh desktop database and icon theme caches' \
 'self-update:Update appmgr itself to the latest version' \
 'completions:Generate shell completions (bash, zsh, fish)' \
@@ -998,6 +1025,11 @@ _appmgr__subcmd__help__subcmd__rollback_commands() {
 _appmgr__subcmd__help__subcmd__run_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr help run commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__help__subcmd__sandbox_commands] )) ||
+_appmgr__subcmd__help__subcmd__sandbox_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr help sandbox commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__help__subcmd__search_commands] )) ||
 _appmgr__subcmd__help__subcmd__search_commands() {
@@ -1182,6 +1214,11 @@ _appmgr__subcmd__rollback_commands() {
 _appmgr__subcmd__run_commands() {
     local commands; commands=()
     _describe -t commands 'appmgr run commands' commands "$@"
+}
+(( $+functions[_appmgr__subcmd__sandbox_commands] )) ||
+_appmgr__subcmd__sandbox_commands() {
+    local commands; commands=()
+    _describe -t commands 'appmgr sandbox commands' commands "$@"
 }
 (( $+functions[_appmgr__subcmd__search_commands] )) ||
 _appmgr__subcmd__search_commands() {
