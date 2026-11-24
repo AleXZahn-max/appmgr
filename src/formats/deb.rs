@@ -50,8 +50,7 @@ impl DebPackage {
 
         let file = File::open(&self.file_path)
             .map_err(|e| format!("Failed to open deb {}: {}", self.file_path.display(), e))?;
-        let mut archive =
-            ar::Archive::new(file);
+        let mut archive = ar::Archive::new(file);
 
         let mut control_tar_data = Vec::new();
         let mut control_tar_name = String::new();
@@ -116,8 +115,8 @@ impl DebPackage {
             let decoder = flate2::read::GzDecoder::new(cursor);
             Self::find_control_in_tar(decoder)
         } else if name.ends_with(".zst") {
-            let decoder = zstd::Decoder::new(cursor)
-                .map_err(|e| format!("zstd init error: {}", e))?;
+            let decoder =
+                zstd::Decoder::new(cursor).map_err(|e| format!("zstd init error: {}", e))?;
             Self::find_control_in_tar(decoder)
         } else {
             Self::find_control_in_tar(cursor)
@@ -167,8 +166,7 @@ impl DebPackage {
             .map_err(|e| format!("Failed to create destination dir: {}", e))?;
 
         // Extract data.tar.*
-        let file = File::open(&self.file_path)
-            .map_err(|e| format!("Failed to open deb: {}", e))?;
+        let file = File::open(&self.file_path).map_err(|e| format!("Failed to open deb: {}", e))?;
         let mut archive = ar::Archive::new(file);
 
         let mut data_tar_name = String::new();
@@ -198,8 +196,7 @@ impl DebPackage {
             let decoder = flate2::read::GzDecoder::new(cursor);
             crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &app_dir)?;
         } else if data_tar_name.ends_with(".zst") {
-            let decoder = zstd::Decoder::new(cursor)
-                .map_err(|e| format!("zstd error: {}", e))?;
+            let decoder = zstd::Decoder::new(cursor).map_err(|e| format!("zstd error: {}", e))?;
             crate::formats::archive::ArchivePackage::extract_tar_safe(decoder, &app_dir)?;
         } else {
             crate::formats::archive::ArchivePackage::extract_tar_safe(cursor, &app_dir)?;
@@ -268,10 +265,13 @@ impl DebPackage {
                 for entry in walkdir::WalkDir::new(s_dir).into_iter().flatten() {
                     let p = entry.path();
                     let name = p.file_name().unwrap_or_default().to_string_lossy();
-                    if p.is_file() && !name.ends_with(".so") && !name.contains(".so.")
-                        && crate::formats::archive::ArchivePackage::is_executable_file(p) {
-                            executables.push(p.to_path_buf());
-                        }
+                    if p.is_file()
+                        && !name.ends_with(".so")
+                        && !name.contains(".so.")
+                        && crate::formats::archive::ArchivePackage::is_executable_file(p)
+                    {
+                        executables.push(p.to_path_buf());
+                    }
                 }
             }
         }
@@ -281,10 +281,13 @@ impl DebPackage {
             for entry in walkdir::WalkDir::new(app_dir).into_iter().flatten() {
                 let p = entry.path();
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                if p.is_file() && !name.ends_with(".so") && !name.contains(".so.")
-                    && crate::formats::archive::ArchivePackage::is_executable_file(p) {
-                        executables.push(p.to_path_buf());
-                    }
+                if p.is_file()
+                    && !name.ends_with(".so")
+                    && !name.contains(".so.")
+                    && crate::formats::archive::ArchivePackage::is_executable_file(p)
+                {
+                    executables.push(p.to_path_buf());
+                }
             }
         }
 

@@ -1,4 +1,6 @@
-use crate::deps::analyzer::{detect_elf_class, is_core_host_only, parse_ldd_output, ElfClass, MissingLib};
+use crate::deps::analyzer::{
+    detect_elf_class, is_core_host_only, parse_ldd_output, ElfClass, MissingLib,
+};
 use crate::ui::{apt_prefix, c, Colors, PacmanBar};
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
@@ -147,7 +149,10 @@ pub fn extract_so_from_tar<R: Read>(
     let mut tar = tar::Archive::new(reader);
     for entry_res in tar.entries().map_err(|e| format!("Tar error: {}", e))? {
         let mut entry = entry_res.map_err(|e| format!("Tar entry error: {}", e))?;
-        let path = entry.path().map_err(|e| format!("Tar path error: {}", e))?.to_path_buf();
+        let path = entry
+            .path()
+            .map_err(|e| format!("Tar path error: {}", e))?
+            .to_path_buf();
         let filename = match path.file_name() {
             Some(n) => n.to_string_lossy().to_string(),
             None => continue,
@@ -260,7 +265,11 @@ pub async fn download_file_cached(
     }
 
     if !resp.status().is_success() {
-        return Err(format!("Download failed with HTTP {} for {}", resp.status(), url));
+        return Err(format!(
+            "Download failed with HTTP {} for {}",
+            resp.status(),
+            url
+        ));
     }
 
     let new_etag = resp
@@ -273,8 +282,8 @@ pub async fn download_file_cached(
     let mut bar = PacmanBar::new(100, label, "%");
 
     let temp_dest = dest_path.with_extension("part");
-    let mut file = File::create(&temp_dest)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    let mut file =
+        File::create(&temp_dest).map_err(|e| format!("Failed to create temp file: {}", e))?;
 
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
@@ -310,7 +319,8 @@ pub async fn ensure_debian_index_cached(
     arch_str: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
     let deps_index_dir = cache_dir.join("deps-index");
-    fs::create_dir_all(&deps_index_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    fs::create_dir_all(&deps_index_dir)
+        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
     let contents_filename = format!("Contents-{}.gz", arch_str);
     let packages_filename = format!("Packages-{}.gz", arch_str);
@@ -407,18 +417,19 @@ pub async fn resolve_rootless_libraries(
             let contents_file = File::open(&contents_path)
                 .map_err(|e| format!("Failed to open Contents index: {}", e))?;
             let gz_contents = GzDecoder::new(contents_file);
-            let pkg_name = match search_contents_file(gz_contents, &missing.soname, missing.elf_class) {
-                Some(p) => p,
-                None => {
-                    println!(
-                        "{} Library '{}' not found in Debian {} Contents index.",
-                        apt_prefix("WARN"),
-                        missing.soname,
-                        arch_str
-                    );
-                    continue;
-                }
-            };
+            let pkg_name =
+                match search_contents_file(gz_contents, &missing.soname, missing.elf_class) {
+                    Some(p) => p,
+                    None => {
+                        println!(
+                            "{} Library '{}' not found in Debian {} Contents index.",
+                            apt_prefix("WARN"),
+                            missing.soname,
+                            arch_str
+                        );
+                        continue;
+                    }
+                };
 
             // 2. Find package details in Packages-<arch>.gz
             let packages_file = File::open(&packages_path)
@@ -438,7 +449,11 @@ pub async fn resolve_rootless_libraries(
 
             // 3. Download and verify .deb
             let deb_url = format!("{}/{}", DEBIAN_MIRROR_ROOT, deb_info.filename);
-            let deb_filename = deb_info.filename.split('/').next_back().unwrap_or("lib.deb");
+            let deb_filename = deb_info
+                .filename
+                .split('/')
+                .next_back()
+                .unwrap_or("lib.deb");
             let temp_deb_path = cache_dir.join("downloads").join(deb_filename);
 
             println!(
@@ -459,7 +474,11 @@ pub async fn resolve_rootless_libraries(
                 .map_err(|e| format!("Failed to download {}: {}", deb_url, e))?;
 
             if !resp.status().is_success() {
-                return Err(format!("Download failed with HTTP {} for {}", resp.status(), deb_url));
+                return Err(format!(
+                    "Download failed with HTTP {} for {}",
+                    resp.status(),
+                    deb_url
+                ));
             }
 
             let total_bytes = resp.content_length().unwrap_or(0);
@@ -513,7 +532,10 @@ pub async fn resolve_rootless_libraries(
                 "{} Extracted {} library files into {}",
                 apt_prefix("OK"),
                 extracted.len(),
-                c(&deps_lib_dir.display().to_string(), &[Colors::BOLD, Colors::BRIGHT_GREEN])
+                c(
+                    &deps_lib_dir.display().to_string(),
+                    &[Colors::BOLD, Colors::BRIGHT_GREEN]
+                )
             );
         }
 
@@ -540,9 +562,12 @@ pub async fn resolve_rootless_libraries(
                                 String::from_utf8_lossy(&output.stdout),
                                 String::from_utf8_lossy(&output.stderr)
                             );
-                            let sub_missing = parse_ldd_output(&combined, elf_class, &internal_sonames);
+                            let sub_missing =
+                                parse_ldd_output(&combined, elf_class, &internal_sonames);
                             for m in sub_missing {
-                                if !visited_sonames.contains(&m.soname) && !is_core_host_only(&m.soname) {
+                                if !visited_sonames.contains(&m.soname)
+                                    && !is_core_host_only(&m.soname)
+                                {
                                     next_queue.push(m);
                                 }
                             }
@@ -578,8 +603,13 @@ pub fn update_launcher_ld_path(launcher_path: &Path, _app_dir: &Path) -> Result<
             "export LD_LIBRARY_PATH=\"",
             &format!("export LD_LIBRARY_PATH=\"{}", deps_str),
         );
-        fs::write(launcher_path, new_content)
-            .map_err(|e| format!("Failed to update launcher {}: {}", launcher_path.display(), e))?;
+        fs::write(launcher_path, new_content).map_err(|e| {
+            format!(
+                "Failed to update launcher {}: {}",
+                launcher_path.display(),
+                e
+            )
+        })?;
     }
 
     Ok(())

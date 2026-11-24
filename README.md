@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.2.1-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.2.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.2.1 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Initializing transaction for btop (GitHub: aristocratos/btop)...                  │
 │  Reading package lists... Done                                                         │
@@ -222,7 +222,7 @@ appmgr search vscode
 # Filter search results by source ID:
 appmgr search gh --source apt-gh
 
-# Filter search results by driver type (apt, appimagehub, aur, github, gitlab):
+# Filter search results by driver type (apt, appimagehub, aur, github):
 appmgr search obsidian --driver appimagehub
 appmgr search paru --driver aur
 
@@ -279,7 +279,7 @@ appmgr link obsidian obsidianmd/obsidian-releases
 appmgr link discord discord/discord-linux
 ```
 
-### 4. Updating AppMgr Itself (`self-update`)
+### 7. Updating AppMgr Itself (`self-update`)
 ```bash
 # Check if a new version of appmgr is available:
 appmgr self-update --check
@@ -288,7 +288,7 @@ appmgr self-update --check
 appmgr self-update -y
 ```
 
-### 5. Managing Environment Variables (`env`)
+### 8. Managing Environment Variables (`env`)
 ```bash
 # Set custom persistent environment variables:
 appmgr env obsidian ELECTRON_OZONE_PLATFORM_HINT=auto QT_QPA_PLATFORM=wayland
@@ -300,7 +300,7 @@ appmgr env obsidian --list
 appmgr env obsidian --unset QT_QPA_PLATFORM
 ```
 
-### 6. Persistent Launch Arguments (`args`)
+### 9. Persistent Launch Arguments (`args`)
 ```bash
 # Set permanent CLI flags passed to the binary on every start:
 appmgr args btop --utf-force --low-color
@@ -312,7 +312,7 @@ appmgr args btop --list
 appmgr args btop --clear
 ```
 
-### 7. Version Freezing (`pin` / `unpin`)
+### 10. Version Freezing (`pin` / `unpin`)
 ```bash
 # Freeze package version to skip during general upgrades:
 appmgr pin btop
@@ -327,7 +327,7 @@ appmgr upgrade btop --force
 appmgr unpin btop
 ```
 
-### 8. Checking & Upgrading Packages (`upgrade`)
+### 11. Checking & Upgrading Packages (`upgrade`)
 ```bash
 # Multi-threaded async check for updates without installing:
 appmgr upgrade --check
@@ -342,7 +342,7 @@ appmgr upgrade -y
 appmgr upgrade gh
 ```
 
-### 9. Rollback & Cache Cleanup (`rollback` / `clean`)
+### 12. Rollback & Cache Cleanup (`rollback` / `clean`)
 ```bash
 # Restore previous version from rollback backup:
 appmgr rollback btop
@@ -351,7 +351,7 @@ appmgr rollback btop
 appmgr clean -y
 ```
 
-### 10. Exporting & Importing Application Manifests (`export` / `import`)
+### 13. Exporting & Importing Application Manifests (`export` / `import`)
 ```bash
 # Export all installed applications and configurations:
 appmgr export my-apps.json
@@ -360,7 +360,7 @@ appmgr export my-apps.json
 appmgr import my-apps.json -y
 ```
 
-### 11. Shared Library Diagnostics & Repair (`deps`)
+### 14. Shared Library Diagnostics & Repair (`deps`)
 ```bash
 # Check shared library dependencies of an installed application:
 appmgr deps spotify-client
@@ -375,7 +375,7 @@ appmgr deps spotify-client --fix
 appmgr deps --all --fix --auto-deps
 ```
 
-### 12. System Diagnostics & Inspection (`doctor` / `info` / `run`)
+### 15. System Diagnostics & Inspection (`doctor` / `info` / `run`)
 ```bash
 # Run comprehensive diagnostic checks (FUSE, bwrap, libraries, PATH):
 appmgr doctor
@@ -387,7 +387,7 @@ appmgr info btop
 appmgr run btop
 ```
 
-### 13. Removing Applications (`remove`)
+### 16. Removing Applications (`remove`)
 ```bash
 appmgr remove btop -y
 ```

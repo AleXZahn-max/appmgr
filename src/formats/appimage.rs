@@ -1,11 +1,35 @@
 use crate::config::Config;
 use crate::db::PackageRecord;
+use crate::ui::apt_prefix;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub fn has_fuse2_runtime() -> bool {
+    let has_fusermount = which::which("fusermount").is_ok() || which::which("fusermount3").is_ok();
+    if !has_fusermount {
+        return false;
+    }
+
+    if let Ok(output) = Command::new("ldconfig").arg("-p").output() {
+        if String::from_utf8_lossy(&output.stdout).contains("libfuse.so.2") {
+            return true;
+        }
+    }
+
+    let std_paths = [
+        "/lib/libfuse.so.2",
+        "/lib64/libfuse.so.2",
+        "/usr/lib/libfuse.so.2",
+        "/usr/lib64/libfuse.so.2",
+        "/usr/lib/x86_64-linux-gnu/libfuse.so.2",
+        "/usr/lib/aarch64-linux-gnu/libfuse.so.2",
+    ];
+    std_paths.iter().any(|p| Path::new(p).exists())
+}
 
 pub struct AppImagePackage {
     pub file_path: PathBuf,
@@ -107,30 +131,32 @@ impl AppImagePackage {
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
 
-        let mut env_lines = Vec::new();
-        for (k, v) in &env_map {
-            env_lines.push(format!("export {}=\"{}\"", k, v));
-        }
-        let env_block = if env_lines.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}", env_lines.join("\n"))
-        };
+        let env_block = crate::sandbox::format_env_exports(&env_map)?;
+        let args_block = format!("\n{}", crate::sandbox::format_persistent_args(&args_vec));
 
-        let args_block = if args_vec.is_empty() {
-            "\nPERSISTENT_ARGS=()\n".to_string()
-        } else {
-            let quoted: Vec<String> = args_vec.iter().map(|a| format!("    \"{}\"", a)).collect();
-            format!("\nPERSISTENT_ARGS=(\n{}\n)\n", quoted.join("\n"))
-        };
+        if !has_fuse2_runtime() {
+            println!(
+                " {} libfuse.so.2 not found; wrapper will fall back to --appimage-extract-and-run (install fuse2 for native mounting).",
+                apt_prefix("WARN")
+            );
+        }
 
         let script = format!(
             r#"#!/usr/bin/env bash
 # Wrapper created by appmgr for {pkg_id} (AppImage)
-APPIMAGE="{target_appimage}"{env_block}
+APPIMAGE={target_appimage}{env_block}
 {args_block}
 if [ -z "$APPIMAGE_EXTRACT_AND_RUN" ]; then
-    if ! command -v fusermount &>/dev/null && ! command -v fusermount3 &>/dev/null; then
+    HAS_FUSE2=0
+    if command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1; then
+        if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q "libfuse\.so\.2"; then
+            HAS_FUSE2=1
+        elif [ -e /lib/libfuse.so.2 ] || [ -e /lib64/libfuse.so.2 ] || [ -e /usr/lib/libfuse.so.2 ] || [ -e /usr/lib64/libfuse.so.2 ] || [ -e /usr/lib/x86_64-linux-gnu/libfuse.so.2 ] || [ -e /usr/lib/aarch64-linux-gnu/libfuse.so.2 ]; then
+            HAS_FUSE2=1
+        fi
+    fi
+    if [ "$HAS_FUSE2" -ne 1 ]; then
+        echo "[appmgr] libfuse.so.2 not found; using --appimage-extract-and-run (install fuse2 for native FUSE mounting)." >&2
         export APPIMAGE_EXTRACT_AND_RUN=1
     fi
 fi
@@ -138,7 +164,7 @@ fi
 exec "$APPIMAGE" "${{PERSISTENT_ARGS[@]}}" "$@"
 "#,
             pkg_id = pkg_id,
-            target_appimage = target_appimage.display(),
+            target_appimage = crate::sandbox::posix_quote(&target_appimage.to_string_lossy()),
             env_block = env_block,
             args_block = args_block,
         );
@@ -214,7 +240,10 @@ Categories=Utility;Application;
         _app_dir: &Path,
         pkg_id: &str,
     ) -> (Option<PathBuf>, Option<PathBuf>) {
-        let temp_dir = match tempfile::tempdir() { Ok(d) => d, Err(_) => return (None, None) };
+        let temp_dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(_) => return (None, None),
+        };
         let output = Command::new(appimage_path)
             .arg("--appimage-extract")
             .current_dir(temp_dir.path())
@@ -235,9 +264,7 @@ Categories=Utility;Application;
         if let Ok(entries) = fs::read_dir(&squashfs_root) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_file()
-                    && p.extension().map(|e| e == "desktop").unwrap_or(false)
-                {
+                if p.is_file() && p.extension().map(|e| e == "desktop").unwrap_or(false) {
                     found_desktop = Some(p);
                     break;
                 }
@@ -279,7 +306,9 @@ Categories=Utility;Application;
             for entry in entries.flatten() {
                 let p = entry.path();
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                if icon_extensions.iter().any(|ext| name.ends_with(ext)) && !name.contains(".DirIcon") {
+                if icon_extensions.iter().any(|ext| name.ends_with(ext))
+                    && !name.contains(".DirIcon")
+                {
                     let ext = p.extension().unwrap_or_default().to_string_lossy();
                     let dest_icon_dir = self.config.icons_dir.join("hicolor/256x256/apps");
                     let _ = fs::create_dir_all(&dest_icon_dir);

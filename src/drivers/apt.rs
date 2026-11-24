@@ -127,10 +127,18 @@ pub async fn sync_apt_repo(
     let etag_file = cache_dir.join(format!("{}.etag", source_id));
 
     let clean_base = base_url.trim_end_matches('/');
-    let gz_url = format!("{}/dists/{}/{}/binary-{}/Packages.gz", clean_base, suite, component, arch);
-    let plain_url = format!("{}/dists/{}/{}/binary-{}/Packages", clean_base, suite, component, arch);
+    let gz_url = format!(
+        "{}/dists/{}/{}/binary-{}/Packages.gz",
+        clean_base, suite, component, arch
+    );
+    let plain_url = format!(
+        "{}/dists/{}/{}/binary-{}/Packages",
+        clean_base, suite, component, arch
+    );
 
-    let existing_etag = fs::read_to_string(&etag_file).ok().map(|s| s.trim().to_string());
+    let existing_etag = fs::read_to_string(&etag_file)
+        .ok()
+        .map(|s| s.trim().to_string());
 
     // 1. Try compressed Packages.gz first
     let mut req = client.get(&gz_url);
@@ -175,7 +183,11 @@ pub async fn sync_apt_repo(
     }
 
     if !resp.status().is_success() {
-        return Err(format!("APT repository returned HTTP {} for {}", resp.status(), target_url));
+        return Err(format!(
+            "APT repository returned HTTP {} for {}",
+            resp.status(),
+            target_url
+        ));
     }
 
     let new_etag = resp
@@ -191,7 +203,9 @@ pub async fn sync_apt_repo(
         .map_err(|e| format!("Failed to download APT packages index: {}", e))?;
     let downloaded_bytes = bytes.len() as u64;
 
-    let text_content = if target_url.ends_with(".gz") || (bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) {
+    let text_content = if target_url.ends_with(".gz")
+        || (bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b)
+    {
         let mut gz = GzDecoder::new(&bytes[..]);
         let mut decompressed = String::new();
         gz.read_to_string(&mut decompressed)
@@ -207,8 +221,7 @@ pub async fn sync_apt_repo(
     let json_bytes = serde_json::to_vec(&packages)
         .map_err(|e| format!("Failed to serialize APT package cache: {}", e))?;
     let _ = fs::create_dir_all(cache_dir);
-    fs::write(&index_file, json_bytes)
-        .map_err(|e| format!("Failed to write APT cache: {}", e))?;
+    fs::write(&index_file, json_bytes).map_err(|e| format!("Failed to write APT cache: {}", e))?;
 
     if let Some(tag) = new_etag {
         let _ = fs::write(&etag_file, tag);

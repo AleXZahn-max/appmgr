@@ -36,6 +36,21 @@ pub fn c(text: &str, styles: &[&str]) -> String {
     format!("{}{}{}", styles.join(""), text, Colors::RESET)
 }
 
+pub fn c_stderr(text: &str, styles: &[&str]) -> String {
+    if !io::stderr().is_terminal() {
+        return text.to_string();
+    }
+    format!("{}{}{}", styles.join(""), text, Colors::RESET)
+}
+
+/// Returns a prefix of `s` containing at most `max_chars` Unicode scalar values.
+pub fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 #[allow(dead_code)]
 pub fn pacman_prompt(msg: &str) -> String {
     format!(
@@ -45,17 +60,29 @@ pub fn pacman_prompt(msg: &str) -> String {
     )
 }
 
-pub fn apt_prefix(status: &str) -> String {
+fn format_apt_prefix<F>(status: &str, colorize: F) -> String
+where
+    F: Fn(&str, &[&str]) -> String,
+{
     match status {
-        "OK" => c("[  OK  ]", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-        "DONE" => c("[ DONE ]", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-        "INFO" => c("[ INFO ]", &[Colors::BOLD, Colors::BRIGHT_CYAN]),
-        "WARN" => c("[ WARN ]", &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
-        "FAIL" => c("[ FAIL ]", &[Colors::BOLD, Colors::BRIGHT_RED]),
-        "WORK" => c("[ WORK ]", &[Colors::BOLD, Colors::BRIGHT_MAGENTA]),
-        "TRIG" => c("[ TRIG ]", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+        "OK" => colorize("[  OK  ]", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+        "DONE" => colorize("[ DONE ]", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
+        "INFO" => colorize("[ INFO ]", &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+        "WARN" => colorize("[ WARN ]", &[Colors::BOLD, Colors::BRIGHT_YELLOW]),
+        "FAIL" => colorize("[ FAIL ]", &[Colors::BOLD, Colors::BRIGHT_RED]),
+        "WORK" => colorize("[ WORK ]", &[Colors::BOLD, Colors::BRIGHT_MAGENTA]),
+        "TRIG" => colorize("[ TRIG ]", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+        "GET" => colorize("[  GET ]", &[Colors::BOLD, Colors::BRIGHT_CYAN]),
         _ => format!("[{}]", status),
     }
+}
+
+pub fn apt_prefix(status: &str) -> String {
+    format_apt_prefix(status, c)
+}
+
+pub fn apt_prefix_err(status: &str) -> String {
+    format_apt_prefix(status, c_stderr)
 }
 
 pub fn apt_preflight_animation() {
@@ -149,7 +176,10 @@ impl PacmanBar {
             pacman_sprite,
             candy_trail,
             c(")", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
-            c(&format!("{:3}%", percent), &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+            c(
+                &format!("{:3}%", percent),
+                &[Colors::BOLD, Colors::BRIGHT_CYAN]
+            ),
             c(
                 &format!("[{}/{} {}]", self.current, self.total, self.unit),
                 &[Colors::DIM, Colors::WHITE]
@@ -166,7 +196,10 @@ impl PacmanBar {
     pub fn finish(&mut self, final_text: &str) {
         if self.is_tty {
             let bar_width = 30;
-            let bar_body = c(&"#".repeat(bar_width), &[Colors::BOLD, Colors::BRIGHT_GREEN]);
+            let bar_body = c(
+                &"#".repeat(bar_width),
+                &[Colors::BOLD, Colors::BRIGHT_GREEN],
+            );
             let sprite = c(" (•‿•)", &[Colors::BOLD, Colors::BRIGHT_GREEN]);
 
             let rendered = format!(
@@ -250,6 +283,14 @@ impl Drop for Spinner {
 }
 
 pub fn confirm_dialog(prompt: &str, default: bool) -> bool {
+    if !io::stdin().is_terminal() {
+        eprintln!(
+            "{} Non-interactive stdin detected; pass -y/--yes to confirm.",
+            apt_prefix_err("WARN")
+        );
+        return false;
+    }
+
     let suffix = if default { "[Y/n]" } else { "[y/N]" };
     print!(
         "{} {} {}: ",
@@ -260,8 +301,9 @@ pub fn confirm_dialog(prompt: &str, default: bool) -> bool {
     let _ = io::stdout().flush();
 
     let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
-        return default;
+    match io::stdin().read_line(&mut input) {
+        Ok(0) | Err(_) => return false,
+        Ok(_) => {}
     }
     let trimmed = input.trim().to_lowercase();
     if trimmed.is_empty() {
@@ -315,7 +357,11 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
         .map(|(w, _)| w.0 as usize)
         .unwrap_or(80);
 
-    let total_spacing = if widths.is_empty() { 0 } else { (widths.len() - 1) * 3 + 4 };
+    let total_spacing = if widths.is_empty() {
+        0
+    } else {
+        (widths.len() - 1) * 3 + 4
+    };
     let total_width: usize = widths.iter().sum::<usize>() + total_spacing;
 
     if total_width > max_cols && !widths.is_empty() {
@@ -342,13 +388,20 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
                 h.to_string()
             };
             let pad = col_limit.saturating_sub(clean_h.len());
-            format!("{}{}", c(&clean_h, &[Colors::BOLD, Colors::BRIGHT_WHITE]), " ".repeat(pad))
+            format!(
+                "{}{}",
+                c(&clean_h, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                " ".repeat(pad)
+            )
         })
         .collect();
     println!("  {}", header_line.join("   "));
 
     let sep_line: Vec<String> = widths.iter().map(|w| "─".repeat(*w)).collect();
-    println!("  {}", c(&sep_line.join("───"), &[Colors::DIM, Colors::WHITE]));
+    println!(
+        "  {}",
+        c(&sep_line.join("───"), &[Colors::DIM, Colors::WHITE])
+    );
 
     for row in rows {
         let row_line: Vec<String> = row
@@ -359,7 +412,10 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
                 let cell_len = clean_str.chars().count();
                 let col_limit = *widths.get(i).unwrap_or(&cell_len);
                 let display_cell = if cell_len > col_limit {
-                    let mut truncated: String = clean_str.chars().take(col_limit.saturating_sub(3)).collect();
+                    let mut truncated: String = clean_str
+                        .chars()
+                        .take(col_limit.saturating_sub(3))
+                        .collect();
                     truncated.push_str("...");
                     truncated
                 } else {
@@ -390,4 +446,30 @@ pub fn strip_ansi(s: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_chars_utf8_safe() {
+        assert_eq!(truncate_chars("", 20), "");
+        assert_eq!(truncate_chars("short", 20), "short");
+        assert_eq!(
+            truncate_chars("123456789012345678901", 20),
+            "12345678901234567890"
+        );
+        // Multi-byte UTF-8 characters crossing byte index 20 must not panic
+        let multibyte = "app_café_résumé_über_naïve_long_name";
+        let truncated = truncate_chars(multibyte, 20);
+        assert_eq!(truncated.chars().count(), 20);
+        assert_eq!(truncated, "app_café_résumé_über");
+    }
+
+    #[test]
+    fn test_apt_prefix_includes_get() {
+        assert!(apt_prefix("GET").contains("GET"));
+        assert!(apt_prefix("OK").contains("OK"));
+    }
 }

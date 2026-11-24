@@ -21,7 +21,13 @@ pub struct AppImageHubPackage {
 pub fn sanitize_app_id(name: &str) -> String {
     let clean: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = clean.trim_matches('-').to_string();
     if trimmed.is_empty() {
@@ -51,9 +57,13 @@ pub fn parse_appimagehub_feed(json_content: &str) -> HashMap<String, AppImageHub
         };
 
         let id = sanitize_app_id(&name);
-        let description = item.get("description").and_then(|d| d.as_str()).map(|s| s.trim().to_string());
-        
-        let categories = item.get("categories")
+        let description = item
+            .get("description")
+            .and_then(|d| d.as_str())
+            .map(|s| s.trim().to_string());
+
+        let categories = item
+            .get("categories")
             .and_then(|c| c.as_array())
             .map(|arr| {
                 arr.iter()
@@ -74,7 +84,9 @@ pub fn parse_appimagehub_feed(json_content: &str) -> HashMap<String, AppImageHub
                 }
 
                 if link_type.eq_ignore_ascii_case("github") {
-                    let clean = url.trim_start_matches("https://github.com/").trim_matches('/');
+                    let clean = url
+                        .trim_start_matches("https://github.com/")
+                        .trim_matches('/');
                     if clean.contains('/') {
                         github_repo = Some(clean.to_string());
                     }
@@ -108,7 +120,9 @@ pub async fn sync_appimagehub_repo(
     let index_file = cache_dir.join(format!("{}.json", source_id));
     let etag_file = cache_dir.join(format!("{}.etag", source_id));
 
-    let existing_etag = fs::read_to_string(&etag_file).ok().map(|s| s.trim().to_string());
+    let existing_etag = fs::read_to_string(&etag_file)
+        .ok()
+        .map(|s| s.trim().to_string());
     let mut req = client.get(feed_url);
 
     if let Some(ref tag) = existing_etag {
@@ -121,7 +135,9 @@ pub async fn sync_appimagehub_repo(
         }
     }
 
-    let resp = req.send().await
+    let resp = req
+        .send()
+        .await
         .map_err(|e| format!("Failed to fetch AppImageHub feed {}: {}", feed_url, e))?;
 
     if resp.status() == StatusCode::NOT_MODIFIED {
@@ -130,7 +146,11 @@ pub async fn sync_appimagehub_repo(
     }
 
     if !resp.status().is_success() {
-        return Err(format!("AppImageHub returned HTTP {} for {}", resp.status(), feed_url));
+        return Err(format!(
+            "AppImageHub returned HTTP {} for {}",
+            resp.status(),
+            feed_url
+        ));
     }
 
     let new_etag = resp
@@ -140,7 +160,9 @@ pub async fn sync_appimagehub_repo(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let bytes = resp.bytes().await
+    let bytes = resp
+        .bytes()
+        .await
         .map_err(|e| format!("Failed to read AppImageHub feed body: {}", e))?;
     let downloaded_bytes = bytes.len() as u64;
 
@@ -213,12 +235,18 @@ mod tests {
 
         let obs = pkgs.get("obsidian").expect("obsidian should exist");
         assert_eq!(obs.name, "Obsidian");
-        assert_eq!(obs.github_repo.as_deref(), Some("obsidianmd/obsidian-releases"));
+        assert_eq!(
+            obs.github_repo.as_deref(),
+            Some("obsidianmd/obsidian-releases")
+        );
         assert_eq!(obs.categories, vec!["Office", "Utility"]);
 
         let krita = pkgs.get("krita").expect("krita should exist");
         assert_eq!(krita.name, "Krita");
         assert_eq!(krita.github_repo, None);
-        assert_eq!(krita.download_url.as_deref(), Some("https://download.kde.org/krita.AppImage"));
+        assert_eq!(
+            krita.download_url.as_deref(),
+            Some("https://download.kde.org/krita.AppImage")
+        );
     }
 }

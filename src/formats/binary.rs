@@ -118,34 +118,21 @@ impl BinaryPackage {
         let env_map = env.unwrap_or_default();
         let args_vec = args.unwrap_or_default();
 
-        let mut env_lines = Vec::new();
-        for (k, v) in &env_map {
-            env_lines.push(format!("export {}=\"{}\"", k, v));
-        }
-        let env_block = if env_lines.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}", env_lines.join("\n"))
-        };
-
-        let args_block = if args_vec.is_empty() {
-            "\nPERSISTENT_ARGS=()\n".to_string()
-        } else {
-            let quoted: Vec<String> = args_vec.iter().map(|a| format!("    \"{}\"", a)).collect();
-            format!("\nPERSISTENT_ARGS=(\n{}\n)\n", quoted.join("\n"))
-        };
+        let env_block = crate::sandbox::format_env_exports(&env_map)?;
+        let args_block = format!("\n{}", crate::sandbox::format_persistent_args(&args_vec));
 
         let script = format!(
             r#"#!/usr/bin/env bash
 # Wrapper created by appmgr for {pkg_id} (Standalone binary)
-APP_ROOT="{app_dir}"
+APP_ROOT={app_dir}
 export PATH="$APP_ROOT/bin:$PATH"
 export LD_LIBRARY_PATH="$APP_ROOT/deps/lib:$APP_ROOT/lib:${{LD_LIBRARY_PATH}}"{env_block}
 {args_block}
-exec "$APP_ROOT/bin/{pkg_id}" "${{PERSISTENT_ARGS[@]}}" "$@"
+exec "$APP_ROOT/bin/"{quoted_pkg_id} "${{PERSISTENT_ARGS[@]}}" "$@"
 "#,
             pkg_id = pkg_id,
-            app_dir = app_dir.display(),
+            quoted_pkg_id = crate::sandbox::posix_quote(&pkg_id),
+            app_dir = crate::sandbox::posix_quote(&app_dir.to_string_lossy()),
             env_block = env_block,
             args_block = args_block,
         );

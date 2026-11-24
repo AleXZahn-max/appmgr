@@ -9,12 +9,12 @@ pub struct Doctor {
 }
 
 impl Doctor {
-    pub fn new(config: &Config) -> Self {
-        let db = Database::load(&config.db_file);
-        Self {
+    pub fn new(config: &Config) -> Result<Self, String> {
+        let db = Database::load(&config.db_file)?;
+        Ok(Self {
             config: config.clone(),
             db,
-        }
+        })
     }
 
     pub fn run_all_checks(&self) {
@@ -40,7 +40,10 @@ impl Doctor {
         println!(
             "\n{} {}\n",
             c("::", &[Colors::BOLD, Colors::BRIGHT_GREEN]),
-            c("Diagnostics completed.", &[Colors::BOLD, Colors::BRIGHT_WHITE])
+            c(
+                "Diagnostics completed.",
+                &[Colors::BOLD, Colors::BRIGHT_WHITE]
+            )
         );
     }
 
@@ -182,14 +185,18 @@ impl Doctor {
                 self.config.bin_dir.display()
             );
             for b in broken {
-                println!("        - {}", b.file_name().unwrap_or_default().to_string_lossy());
+                println!(
+                    "        - {}",
+                    b.file_name().unwrap_or_default().to_string_lossy()
+                );
             }
         }
     }
 
     pub fn check_shared_libraries(&self) {
         let installed = self.db.all();
-        let mut missing_map: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+        let mut missing_map: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
 
         for pkg in &installed {
             if pkg.format == "appimage" {
@@ -233,7 +240,10 @@ impl Doctor {
             }
             println!(
                 "        Run {} to automatically diagnose and resolve them.",
-                c("appmgr deps --all --fix", &[Colors::BOLD, Colors::BRIGHT_CYAN])
+                c(
+                    "appmgr deps --all --fix",
+                    &[Colors::BOLD, Colors::BRIGHT_CYAN]
+                )
             );
         }
     }
@@ -241,7 +251,10 @@ impl Doctor {
     pub fn report_disk_usage(&self) {
         let mut total_bytes: u64 = 0;
         if self.config.apps_dir.exists() {
-            for entry in walkdir::WalkDir::new(&self.config.apps_dir).into_iter().flatten() {
+            for entry in walkdir::WalkDir::new(&self.config.apps_dir)
+                .into_iter()
+                .flatten()
+            {
                 if entry.file_type().is_file() {
                     if let Ok(meta) = entry.metadata() {
                         total_bytes += meta.len();

@@ -1,4 +1,4 @@
-.TH APPMGR 1 "November 2026" "appmgr 2.2.0" "User Commands"
+.TH APPMGR 1 "November 2026" "appmgr 2.2.1" "User Commands"
 .SH NAME
 appmgr \- Universal application combine for .deb, .AppImage, binary archives (.tar.*, .zip), and standalone ELF binaries with Package Registry and GitHub integration
 .SH SYNOPSIS
@@ -6,7 +6,7 @@ appmgr \- Universal application combine for .deb, .AppImage, binary archives (.t
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS...\fR]
 .SH DESCRIPTION
 .B appmgr
-is a hybrid package management combine that brings the aesthetics and animations of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v1 TOML recipes, direct downloads, HTTP 302 redirects, GitLab releases, GitHub Search and Releases APIs, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
+is a hybrid package management combine that brings the aesthetics of Pacman together with the granular dependency analysis and triggers of APT. It accurately installs and manages standalone Debian (.deb) packages, AppImage (.AppImage) binaries, binary archives (.tar.xz, .tar.zst, .tar.gz, .tgz, .tar.bz2, .zip), and raw standalone ELF binaries into isolated directories, automatically creates application wrappers, configures desktop shortcuts for GUI apps, extracts icons, and updates system caches. It supports declarative package registries (sources.list) with Schema v2 TOML source recipes, direct downloads, HTTP 302 redirects, GitHub Search and Releases APIs, multithreaded upgrade checking, SHA-256 verification, version pinning, rollback caching, environment variables and arguments management, and JSON manifest export/import.
 .SH COMMANDS
 .TP
 \fBinstall\fR, \fBi\fR \fITARGET\fR [\fI--repo OWNER/REPO\fR] [\fI--prefer appimage|deb|tar|zip|bin\fR] [\fI--pre\fR] [\fI-y\fR] [\fI--auto-deps\fR] [\fI--no-deps\fR] [\fI--rootless-deps\fR]
@@ -22,22 +22,26 @@ Automatically filters assets by host architecture, validates SHA-256 checksums i
 Inspects or repairs dynamic shared library (.so) dependencies for installed applications.
 With \fI--fix\fR, automatically resolves missing dependencies via native host packages (Tier 1) or downloads rootless library bundles into the application's isolated sandbox (Tier 2).
 .TP
-\fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR [\fI--offline\fR]
+\fBsearch\fR, \fBs\fR, \fBfind\fR \fIQUERY\fR [\fI--source ID\fR] [\fI--driver TYPE\fR] [\fI--offline\fR]
 Searches local package registry databases and upstream GitHub repositories for applications matching \fIQUERY\fR.
 .TP
 \fBupdate\fR, \fBsync\fR
 Synchronizes local repository databases from configured package registries in sources.list using ETag caching and concurrent retrieval.
 .TP
-\fBrepo\fR \fISUBCOMMAND\fR
+\fBrepo\fR, \fBsources\fR \fISUBCOMMAND\fR
 Manages package repositories in \fB~/.config/appmgr/sources.list\fR (or \fB/etc/appmgr/sources.list\fR).
-Subcommands: \fBlist\fR, \fBadd <id> <url>\fR, \fBremove <id>\fR, \fBenable <id>\fR, \fBdisable <id>\fR.
+Subcommands: \fBlist [--json]\fR, \fBadd <driver> <id> <url>\fR, \fBremove <id>\fR, \fBenable <id>\fR, \fBdisable <id>\fR.
+.TP
+\fBsource\fR \fISUBCOMMAND\fR
+Validates and tests Schema v2 TOML source definitions.
+Subcommands: \fBlint <file.toml>\fR, \fBtest <file.toml>\fR.
 .TP
 \fBpkg\fR \fISUBCOMMAND\fR
-Maintainer tools for recipe creation, validation, and testing.
+Maintainer tools for Schema v2 source recipe creation, validation, and testing.
 Subcommands:
-- \fBnew <id> [-o file.toml]\fR: Generates a Schema v1 TOML recipe template.
-- \fBlint <file.toml>\fR: Validates a recipe against Schema v1 constraints.
-- \fBtest <file.toml> [--dry-run]\fR: Tests upstream URL reachability and asset resolution.
+- \fBnew <id> [-o file.toml]\fR: Generates a Schema v2 TOML source recipe template.
+- \fBlint <file.toml>\fR: Validates a recipe against Schema v2 constraints.
+- \fBtest <file.toml> [--dry-run]\fR: Tests upstream URL reachability and index access.
 .TP
 \fBlink\fR \fIAPP\fR \fIOWNER/REPO\fR
 Links an existing installed application to a GitHub repository to track future releases and updates.
@@ -86,6 +90,12 @@ Launches an application with its configured environment and persistent arguments
 .TP
 \fBupdate-db\fR
 Forces update of desktop menu databases and icon theme caches.
+.TP
+\fBself-update\fR [\fI--check\fR] [\fI--pre\fR] [\fI-y\fR]
+Updates the \fBappmgr\fR binary from GitHub Releases (disabled when built without \fBself-update\fR feature or managed by pacman).
+.TP
+\fBcompletions\fR \fISHELL\fR
+Generates shell completions (\fBbash\fR, \fBzsh\fR, \fBfish\fR) to standard output.
 .SH OPTIONS
 .TP
 \fB-y\fR, \fB--yes\fR, \fB--noconfirm\fR
@@ -97,7 +107,7 @@ Install into user home directory (~/.local) without requiring root/sudo privileg
 \fB--system\fR
 Install system-wide into /opt/appmgr/apps and /usr/local/bin (requires root/sudo).
 .TP
-\fB-v\fR, \fB--version\fR
+\fB-V\fR, \fB--version\fR
 Show version and exit.
 .SH AUTHORS
 Alex Zahn

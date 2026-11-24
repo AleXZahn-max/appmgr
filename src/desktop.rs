@@ -10,8 +10,15 @@ pub fn is_gui_binary(binary_path: &Path) -> bool {
         if file.read_to_end(&mut buffer).is_ok() {
             if let Ok(elf) = Elf::parse(&buffer) {
                 let gui_libs = [
-                    "libx11", "libwayland", "libgtk", "libqt5", "libqt6", "libsdl", "libgl",
-                    "libcairo", "libpango",
+                    "libx11",
+                    "libwayland",
+                    "libgtk",
+                    "libqt5",
+                    "libqt6",
+                    "libsdl",
+                    "libgl",
+                    "libcairo",
+                    "libpango",
                 ];
                 for lib in &elf.libraries {
                     let lower = lib.to_lowercase();

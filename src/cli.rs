@@ -46,13 +46,25 @@ pub enum Commands {
         #[arg(help = "Path to package, GitHub target (owner/repo[@tag]), or search query")]
         package: String,
 
-        #[arg(short = 'f', long = "force", help = "Force overwrite existing installation")]
+        #[arg(
+            short = 'f',
+            long = "force",
+            help = "Force overwrite existing installation"
+        )]
         force: bool,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompts")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompts"
+        )]
         yes: bool,
 
-        #[arg(long = "repo", help = "Associate package with GitHub repository (owner/repo)")]
+        #[arg(
+            long = "repo",
+            help = "Associate package with GitHub repository (owner/repo)"
+        )]
         repo: Option<String>,
 
         #[arg(long = "prefer", value_enum, help = "Preferred asset format")]
@@ -61,13 +73,22 @@ pub enum Commands {
         #[arg(long = "pre", help = "Allow pre-release versions")]
         pre: bool,
 
-        #[arg(long = "auto-deps", help = "Automatically install missing host dependencies")]
+        #[arg(
+            long = "auto-deps",
+            help = "Automatically install missing host dependencies"
+        )]
         auto_deps: bool,
 
-        #[arg(long = "no-deps", help = "Skip dynamic dependency check and resolution")]
+        #[arg(
+            long = "no-deps",
+            help = "Skip dynamic dependency check and resolution"
+        )]
         no_deps: bool,
 
-        #[arg(long = "rootless-deps", help = "Bundle missing libraries into local sandbox (no sudo)")]
+        #[arg(
+            long = "rootless-deps",
+            help = "Bundle missing libraries into local sandbox (no sudo)"
+        )]
         rootless_deps: bool,
     },
 
@@ -83,7 +104,10 @@ pub enum Commands {
         #[arg(long = "source", help = "Filter by specific source ID")]
         source: Option<String>,
 
-        #[arg(long = "driver", help = "Filter by driver type (apt, appimagehub, aur, github, gitlab)")]
+        #[arg(
+            long = "driver",
+            help = "Filter by driver type (apt, appimagehub, aur, github)"
+        )]
         driver: Option<String>,
 
         #[arg(long = "offline", help = "Search only local repository cache")]
@@ -96,7 +120,10 @@ pub enum Commands {
     )]
     Update,
 
-    #[command(alias = "sources", about = "Manage software sources and repositories in sources.list")]
+    #[command(
+        alias = "sources",
+        about = "Manage software sources and repositories in sources.list"
+    )]
     Repo {
         #[command(subcommand)]
         command: RepoCommands,
@@ -108,21 +135,32 @@ pub enum Commands {
         command: SourceCommands,
     },
 
-    #[command(about = "Diagnose and repair shared library dependencies for installed applications")]
+    #[command(
+        about = "Diagnose and repair shared library dependencies for installed applications"
+    )]
     Deps {
         #[arg(help = "Application ID to check")]
         app: Option<String>,
 
-        #[arg(long = "all", help = "Check dependencies for all installed applications")]
+        #[arg(
+            long = "all",
+            help = "Check dependencies for all installed applications"
+        )]
         all: bool,
 
         #[arg(long = "fix", help = "Resolve and install missing dependencies")]
         fix: bool,
 
-        #[arg(long = "auto-deps", help = "Automatically confirm host package installation")]
+        #[arg(
+            long = "auto-deps",
+            help = "Automatically confirm host package installation"
+        )]
         auto_deps: bool,
 
-        #[arg(long = "rootless-deps", help = "Bundle missing libraries into local sandbox (no sudo)")]
+        #[arg(
+            long = "rootless-deps",
+            help = "Bundle missing libraries into local sandbox (no sudo)"
+        )]
         rootless_deps: bool,
     },
 
@@ -149,10 +187,19 @@ pub enum Commands {
         #[arg(help = "Specific application to upgrade (optional)")]
         app: Option<String>,
 
-        #[arg(short = 'c', long = "check", help = "Check for available updates without installing")]
+        #[arg(
+            short = 'c',
+            long = "check",
+            help = "Check for available updates without installing"
+        )]
         check: bool,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompts")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompts"
+        )]
         yes: bool,
 
         #[arg(short = 'f', long = "force", help = "Force upgrade even if pinned")]
@@ -178,7 +225,12 @@ pub enum Commands {
         #[arg(help = "Name or ID of installed application")]
         package: String,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompts")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompts"
+        )]
         yes: bool,
     },
 
@@ -197,7 +249,10 @@ pub enum Commands {
         target: String,
     },
 
-    #[command(alias = "check", about = "Check system health, FUSE, and broken symlinks")]
+    #[command(
+        alias = "check",
+        about = "Check system health, FUSE, and broken symlinks"
+    )]
     Doctor,
 
     #[command(about = "Launch an installed application")]
@@ -205,7 +260,11 @@ pub enum Commands {
         #[arg(help = "Application name or ID")]
         app: String,
 
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, help = "Arguments passed to application")]
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Arguments passed to application"
+        )]
         args: Vec<String>,
     },
 
@@ -214,7 +273,11 @@ pub enum Commands {
         #[arg(help = "Application name or ID")]
         app: String,
 
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, help = "Variable pairs to set (e.g. KEY=VALUE)")]
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Variable pairs to set (e.g. KEY=VALUE)"
+        )]
         pairs: Vec<String>,
 
         #[arg(long = "unset", help = "Unset an environment variable")]
@@ -229,7 +292,11 @@ pub enum Commands {
         #[arg(help = "Application name or ID")]
         app: String,
 
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, help = "Persistent flags to pass")]
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Persistent flags to pass"
+        )]
         cli_args: Vec<String>,
 
         #[arg(long = "clear", help = "Clear all persistent launch flags")]
@@ -256,13 +323,23 @@ pub enum Commands {
         #[arg(help = "Application name or ID")]
         app: String,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompt")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompt"
+        )]
         yes: bool,
     },
 
     #[command(about = "Clean rollback backups and temporary cache")]
     Clean {
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompt")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompt"
+        )]
         yes: bool,
     },
 
@@ -277,7 +354,12 @@ pub enum Commands {
         #[arg(help = "Path to manifest JSON file")]
         file: String,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to all prompts")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to all prompts"
+        )]
         yes: bool,
     },
 
@@ -285,15 +367,27 @@ pub enum Commands {
     UpdateDb,
 
     #[cfg(feature = "self-update")]
-    #[command(name = "self-update", about = "Update appmgr itself to the latest version")]
+    #[command(
+        name = "self-update",
+        about = "Update appmgr itself to the latest version"
+    )]
     SelfUpdate {
-        #[arg(short = 'c', long = "check", help = "Check for available appmgr updates without installing")]
+        #[arg(
+            short = 'c',
+            long = "check",
+            help = "Check for available appmgr updates without installing"
+        )]
         check: bool,
 
         #[arg(long = "pre", help = "Allow pre-release versions")]
         pre: bool,
 
-        #[arg(short = 'y', long = "yes", alias = "noconfirm", help = "Assume yes to prompt")]
+        #[arg(
+            short = 'y',
+            long = "yes",
+            alias = "noconfirm",
+            help = "Assume yes to prompt"
+        )]
         yes: bool,
     },
 
@@ -313,7 +407,7 @@ pub enum RepoCommands {
     },
     #[command(about = "Add a repository to sources.list")]
     Add {
-        #[arg(help = "Driver or registry type (apt, appimagehub, aur, github, gitlab, registry)")]
+        #[arg(help = "Driver or registry type (apt, appimagehub, aur, github, registry)")]
         driver: String,
         #[arg(help = "Repository identifier (e.g. core, my-apt)")]
         id: String,
@@ -359,14 +453,14 @@ pub enum SourceCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum PkgCommands {
-    #[command(about = "Generate a new Schema v1 package recipe template")]
+    #[command(about = "Generate a new Schema v2 source recipe template")]
     New {
-        #[arg(help = "Package ID for the new recipe")]
+        #[arg(help = "Source ID for the new recipe")]
         id: String,
         #[arg(short = 'o', long = "output", help = "Destination TOML file path")]
         output: Option<String>,
     },
-    #[command(about = "Lint and validate a TOML package recipe against Schema v1")]
+    #[command(about = "Lint and validate a TOML source recipe against Schema v2")]
     Lint {
         #[arg(help = "Path to TOML recipe file")]
         file: String,

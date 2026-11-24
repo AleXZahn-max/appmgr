@@ -122,9 +122,7 @@ pub fn parse_ldd_output(
 
 /// Collects internal library paths and SONAMEs within app_dir,
 /// so internal bundled libraries (e.g. libcef.so, libffmpeg.so) are not reported as missing.
-pub fn collect_internal_library_environment(
-    app_dir: &Path,
-) -> (String, HashSet<String>) {
+pub fn collect_internal_library_environment(app_dir: &Path) -> (String, HashSet<String>) {
     let mut lib_dirs = BTreeSet::new();
     let mut sonames = HashSet::new();
 

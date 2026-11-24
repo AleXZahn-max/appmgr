@@ -110,40 +110,85 @@ pub struct Database {
     pub data: HashMap<String, PackageRecord>,
 }
 
+fn append_path_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(suffix);
+    PathBuf::from(os)
+}
+
+fn atomic_write_bytes(target: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = append_path_suffix(target, &format!(".tmp.{}", std::process::id()));
+    let write_res = (|| -> io::Result<()> {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    if let Err(e) = fs::rename(&tmp_path, target) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    Ok(())
+}
+
 impl Database {
-    pub fn load(path: &Path) -> Self {
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(data) = serde_json::from_str::<HashMap<String, PackageRecord>>(&content) {
-                    return Self {
-                        path: path.to_path_buf(),
-                        data,
-                    };
-                }
-            }
+    pub fn backup_path(path: &Path) -> PathBuf {
+        append_path_suffix(path, ".bak")
+    }
+
+    pub fn corrupt_path(path: &Path) -> PathBuf {
+        append_path_suffix(path, ".corrupt")
+    }
+
+    pub fn load(path: &Path) -> Result<Self, String> {
+        if !path.exists() {
+            return Ok(Self {
+                path: path.to_path_buf(),
+                data: HashMap::new(),
+            });
         }
-        Self {
-            path: path.to_path_buf(),
-            data: HashMap::new(),
+
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read database at '{}': {}", path.display(), e))?;
+
+        match serde_json::from_str::<HashMap<String, PackageRecord>>(&content) {
+            Ok(data) => Ok(Self {
+                path: path.to_path_buf(),
+                data,
+            }),
+            Err(e) => {
+                let corrupt_path = Self::corrupt_path(path);
+                let bak_path = Self::backup_path(path);
+                if !corrupt_path.exists() {
+                    let _ = fs::copy(path, &corrupt_path);
+                }
+                Err(format!(
+                    "Database file '{}' is corrupted ({}). Corrupt snapshot preserved at '{}'. Restore from backup '{}' (e.g., cp '{}' '{}') before retrying.",
+                    path.display(),
+                    e,
+                    corrupt_path.display(),
+                    bak_path.display(),
+                    bak_path.display(),
+                    path.display()
+                ))
+            }
         }
     }
 
     pub fn save(&self) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let tmp_path = self.path.with_extension("tmp");
         let content = serde_json::to_string_pretty(&self.data)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        {
-            let mut file = fs::File::create(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.sync_all()?;
-        }
-        if fs::rename(&tmp_path, &self.path).is_err() {
-            fs::copy(&tmp_path, &self.path)?;
-            let _ = fs::remove_file(&tmp_path);
-        }
+        let bytes = content.as_bytes();
+        atomic_write_bytes(&self.path, bytes)?;
+        let bak_path = Self::backup_path(&self.path);
+        atomic_write_bytes(&bak_path, bytes)?;
         Ok(())
     }
 
@@ -333,5 +378,47 @@ mod tests {
         assert_eq!(btop.bwrap, None);
         assert_eq!(btop.bind_opt, None);
         assert_eq!(btop.bundled_deps, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_corrupt_db_protection_and_atomic_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("installed.json");
+
+        let mut db = Database::load(&db_path).unwrap();
+        assert!(db.all().is_empty());
+
+        let rec = PackageRecord {
+            id: "demo".to_string(),
+            name: "demo".to_string(),
+            version: "1.0.0".to_string(),
+            format: "bin".to_string(),
+            install_dir: dir.path().join("apps/demo"),
+            ..Default::default()
+        };
+        db.add(rec).unwrap();
+
+        let bak_path = Database::backup_path(&db_path);
+        assert!(bak_path.exists());
+        let loaded_ok = Database::load(&db_path).unwrap();
+        assert!(loaded_ok.get("demo").is_some());
+
+        // Corrupt installed.json
+        let corrupt_payload = "{ not valid json";
+        fs::write(&db_path, corrupt_payload).unwrap();
+
+        let err = Database::load(&db_path).unwrap_err();
+        assert!(err.contains("installed.json.bak"));
+
+        let corrupt_path = Database::corrupt_path(&db_path);
+        assert!(corrupt_path.exists());
+        assert_eq!(fs::read_to_string(&corrupt_path).unwrap(), corrupt_payload);
+        // Original corrupt file is not overwritten/wiped
+        assert_eq!(fs::read_to_string(&db_path).unwrap(), corrupt_payload);
+
+        // Second corrupt load does not overwrite existing .corrupt snapshot
+        fs::write(&db_path, "{ newer broken").unwrap();
+        let _ = Database::load(&db_path).unwrap_err();
+        assert_eq!(fs::read_to_string(&corrupt_path).unwrap(), corrupt_payload);
     }
 }

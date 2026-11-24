@@ -71,7 +71,7 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l system -d 'For
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand install" -s h -l help -d 'Print help'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l source -d 'Filter by specific source ID' -r
-complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l driver -d 'Filter by driver type (apt, appimagehub, aur, github, gitlab)' -r
+complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l driver -d 'Filter by driver type (apt, appimagehub, aur, github)' -r
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l offline -d 'Search only local repository cache'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -s y -l yes -d 'Automatic yes to prompts'
 complete -c appmgr -n "__fish_appmgr_using_subcommand search" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
@@ -151,8 +151,8 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_s
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -s h -l help -d 'Print help'
-complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "new" -d 'Generate a new Schema v1 package recipe template'
-complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "lint" -d 'Lint and validate a TOML package recipe against Schema v1'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "new" -d 'Generate a new Schema v2 source recipe template'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "lint" -d 'Lint and validate a TOML source recipe against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "test" -d 'Test source resolution and URL reachability for a recipe'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and not __fish_seen_subcommand_from new lint test help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from new" -s o -l output -d 'Destination TOML file path' -r
@@ -169,8 +169,8 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subco
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -l system -d 'Force system-wide installation mode (/opt, /usr/local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -l user -d 'Force user-level rootless mode (~/.local)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from test" -s h -l help -d 'Print help'
-complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "new" -d 'Generate a new Schema v1 package recipe template'
-complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "lint" -d 'Lint and validate a TOML package recipe against Schema v1'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "new" -d 'Generate a new Schema v2 source recipe template'
+complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "lint" -d 'Lint and validate a TOML source recipe against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "test" -d 'Test source resolution and URL reachability for a recipe'
 complete -c appmgr -n "__fish_appmgr_using_subcommand pkg; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c appmgr -n "__fish_appmgr_using_subcommand link" -s y -l yes -d 'Automatic yes to prompts'
@@ -295,6 +295,6 @@ complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subc
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from repo" -f -a "disable" -d 'Disable a repository without deleting its configuration'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from source" -f -a "lint" -d 'Lint and validate a source definition TOML against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from source" -f -a "test" -d 'Test source endpoint reachability and index access'
-complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from pkg" -f -a "new" -d 'Generate a new Schema v1 package recipe template'
-complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from pkg" -f -a "lint" -d 'Lint and validate a TOML package recipe against Schema v1'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from pkg" -f -a "new" -d 'Generate a new Schema v2 source recipe template'
+complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from pkg" -f -a "lint" -d 'Lint and validate a TOML source recipe against Schema v2'
 complete -c appmgr -n "__fish_appmgr_using_subcommand help; and __fish_seen_subcommand_from pkg" -f -a "test" -d 'Test source resolution and URL reachability for a recipe'

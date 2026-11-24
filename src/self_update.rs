@@ -45,7 +45,11 @@ impl SelfUpdater {
         spinner.stop();
 
         if status != StatusCode::OK {
-            println!(" {} No release found for {}", apt_prefix("WARN"), Self::REPO);
+            println!(
+                " {} No release found for {}",
+                apt_prefix("WARN"),
+                Self::REPO
+            );
             return Ok(false);
         }
 
@@ -103,14 +107,20 @@ impl SelfUpdater {
                     "\n{} appmgr is managed by the system package manager (pacman):",
                     apt_prefix("WARN")
                 );
-                println!("        {}", c(stdout_str.trim(), &[Colors::DIM, Colors::WHITE]));
+                println!(
+                    "        {}",
+                    c(stdout_str.trim(), &[Colors::DIM, Colors::WHITE])
+                );
                 println!(
                     "        Automatic binary replacement is disabled to prevent database divergence."
                 );
                 println!("        To update, please use:");
                 println!(
                     "        {}",
-                    c("cd appmgr && makepkg -si", &[Colors::BOLD, Colors::BRIGHT_YELLOW])
+                    c(
+                        "cd appmgr && makepkg -si",
+                        &[Colors::BOLD, Colors::BRIGHT_YELLOW]
+                    )
                 );
                 println!();
                 return Ok(true);
@@ -119,16 +129,19 @@ impl SelfUpdater {
 
         // 2. Direct binary update
         if !assume_yes
-            && !confirm_dialog(
-                &format!("Update appmgr to version {}?", latest_tag),
-                true,
-            ) {
-                println!("{} Update cancelled by user.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
-                return Ok(false);
-            }
+            && !confirm_dialog(&format!("Update appmgr to version {}?", latest_tag), true)
+        {
+            println!(
+                "{} Update cancelled by user.",
+                c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE])
+            );
+            return Ok(false);
+        }
 
         let host_arch = std::env::consts::ARCH;
-        let candidates = self.client.filter_assets(&release.assets, Some("bin"), None, Some("appmgr"));
+        let candidates =
+            self.client
+                .filter_assets(&release.assets, Some("bin"), None, Some("appmgr"));
 
         let chosen = candidates.iter().find(|c| {
             let lower = c.name.to_lowercase();
@@ -172,9 +185,9 @@ impl SelfUpdater {
             )
             .await?;
 
-        let parent_dir = current_exe
-            .parent()
-            .ok_or_else(|| "Failed to determine parent directory of current executable".to_string())?;
+        let parent_dir = current_exe.parent().ok_or_else(|| {
+            "Failed to determine parent directory of current executable".to_string()
+        })?;
 
         let pid = std::process::id();
         let staged_bin = parent_dir.join(format!(".appmgr.new.{}", pid));
@@ -183,7 +196,11 @@ impl SelfUpdater {
         // 1. Copy downloaded new binary to staging file on the same filesystem
         if let Err(e) = fs::copy(&temp_new_bin, &staged_bin) {
             let _ = fs::remove_file(&staged_bin);
-            return Err(format!("Failed to stage new binary in {}: {}", parent_dir.display(), e));
+            return Err(format!(
+                "Failed to stage new binary in {}: {}",
+                parent_dir.display(),
+                e
+            ));
         }
 
         // 2. Set executable permissions
@@ -203,7 +220,10 @@ impl SelfUpdater {
             let _ = fs::rename(&backup_bin, &current_exe);
             let _ = fs::remove_file(&staged_bin);
             let _ = fs::remove_file(&backup_bin);
-            return Err(format!("Failed to install new executable (rolled back): {}", e));
+            return Err(format!(
+                "Failed to install new executable (rolled back): {}",
+                e
+            ));
         }
 
         // 5. Clean up backup and staged temporary files

@@ -224,7 +224,9 @@ pub fn query_host_for_library(
                     let pkg_part = trimmed.split(':').next().unwrap_or("").trim();
                     if let Some((name_ver, arch)) = pkg_part.rsplit_once('.') {
                         let is_match = match missing.elf_class {
-                            ElfClass::Elf64 => arch == "x86_64" || arch == "aarch64" || arch == "noarch",
+                            ElfClass::Elf64 => {
+                                arch == "x86_64" || arch == "aarch64" || arch == "noarch"
+                            }
                             ElfClass::Elf32 => arch == "i686" || arch == "i386",
                         };
                         if is_match {
@@ -262,7 +264,9 @@ pub fn query_host_for_library(
                         let path_trim = path.trim();
                         let is_match = match missing.elf_class {
                             ElfClass::Elf64 => !path_trim.contains("i386-linux-gnu"),
-                            ElfClass::Elf32 => path_trim.contains("i386-linux-gnu") || path_trim.contains("lib32"),
+                            ElfClass::Elf32 => {
+                                path_trim.contains("i386-linux-gnu") || path_trim.contains("lib32")
+                            }
                         };
                         if is_match {
                             return Ok(Some(pkg.trim().to_string()));
@@ -283,7 +287,8 @@ pub fn query_host_for_library(
                 let text = String::from_utf8_lossy(&output.stdout);
                 for line in text.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with('|') || trimmed.starts_with("---") || trimmed.is_empty() {
+                    if trimmed.starts_with('|') || trimmed.starts_with("---") || trimmed.is_empty()
+                    {
                         continue;
                     }
                     let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
@@ -350,7 +355,10 @@ pub fn prompt_and_install_host_packages(
         "\n{} {}",
         c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
         c(
-            &format!("Host packages required to satisfy shared library dependencies ({})", pm.name()),
+            &format!(
+                "Host packages required to satisfy shared library dependencies ({})",
+                pm.name()
+            ),
             &[Colors::BOLD, Colors::BRIGHT_WHITE]
         )
     );
@@ -362,7 +370,11 @@ pub fn prompt_and_install_host_packages(
         for lib in libs {
             rows.push(vec![
                 lib.clone(),
-                format!("{} ({})", c(pkg, &[Colors::BOLD, Colors::BRIGHT_CYAN]), pm.name()),
+                format!(
+                    "{} ({})",
+                    c(pkg, &[Colors::BOLD, Colors::BRIGHT_CYAN]),
+                    pm.name()
+                ),
             ]);
         }
     }
@@ -379,11 +391,18 @@ pub fn prompt_and_install_host_packages(
     );
 
     if !auto_yes && !confirm_dialog("Proceed with host dependency installation?", true) {
-        println!("{} Host dependency installation skipped.", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]));
+        println!(
+            "{} Host dependency installation skipped.",
+            c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE])
+        );
         return Ok(false);
     }
 
-    println!("{} Executing: {}", c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]), cmd_str);
+    println!(
+        "{} Executing: {}",
+        c("::", &[Colors::BOLD, Colors::BRIGHT_BLUE]),
+        cmd_str
+    );
     let mut child = Command::new(&cmd_vec[0])
         .args(&cmd_vec[1..])
         .spawn()
@@ -394,10 +413,16 @@ pub fn prompt_and_install_host_packages(
         .map_err(|e| format!("Failed to wait on installation process: {}", e))?;
 
     if status.success() {
-        println!("{} Host dependencies installed successfully.", apt_prefix("OK"));
+        println!(
+            "{} Host dependencies installed successfully.",
+            apt_prefix("OK")
+        );
         Ok(true)
     } else {
-        Err(format!("Host dependency installation failed with exit code: {:?}", status.code()))
+        Err(format!(
+            "Host dependency installation failed with exit code: {:?}",
+            status.code()
+        ))
     }
 }
 
@@ -443,9 +468,15 @@ mod tests {
     fn test_build_install_command() {
         let pkgs = vec!["libfoo".to_string(), "libbar".to_string()];
         let pacman_cmd = HostPackageManagerKind::Pacman.build_install_command(&pkgs);
-        assert_eq!(pacman_cmd, vec!["sudo", "pacman", "-S", "--needed", "libfoo", "libbar"]);
+        assert_eq!(
+            pacman_cmd,
+            vec!["sudo", "pacman", "-S", "--needed", "libfoo", "libbar"]
+        );
 
         let apt_cmd = HostPackageManagerKind::Apt.build_install_command(&pkgs);
-        assert_eq!(apt_cmd, vec!["sudo", "apt-get", "install", "libfoo", "libbar"]);
+        assert_eq!(
+            apt_cmd,
+            vec!["sudo", "apt-get", "install", "libfoo", "libbar"]
+        );
     }
 }
