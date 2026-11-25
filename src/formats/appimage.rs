@@ -7,7 +7,6 @@ use crate::desktop::{
 use crate::formats::StagingDirGuard;
 use crate::launcher::write_package_launchers;
 use crate::ui::apt_prefix;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -170,18 +169,12 @@ impl AppImagePackage {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "appimage".to_string());
 
-        let ver_re = Regex::new(r"^([a-zA-Z0-9_\-]+?)[-_](v?\d+\..*)").unwrap();
-        let (raw_name, version) = if let Some(caps) = ver_re.captures(&stem) {
-            (
-                caps.get(1).unwrap().as_str().to_string(),
-                caps.get(2).unwrap().as_str().to_string(),
-            )
-        } else {
-            (
-                stem.clone(),
-                self.tag.clone().unwrap_or_else(|| "1.0.0".to_string()),
-            )
-        };
+        let (raw_name, version) = crate::formats::parse_stem_name_and_version(
+            &stem,
+            self.repo.as_deref(),
+            self.tag.as_deref(),
+            false,
+        );
 
         let pkg_id = Self::sanitize_name(&raw_name);
         let desc = format!("AppImage application: {}", raw_name);
@@ -403,5 +396,56 @@ impl AppImagePackage {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_appimage_read_metadata_version_normalization() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::resolve_with_env(
+            false,
+            true,
+            false,
+            dir.path().to_path_buf(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let cases = [
+            ("hibiki-v3.3.0-linux-x64.AppImage", "hibiki", "3.3.0"),
+            ("Mornye-v5.4.5-linux-x86_64.AppImage", "mornye", "5.4.5"),
+            (
+                "tool-v1.2.0-rc.1-linux-amd64.AppImage",
+                "tool",
+                "1.2.0-rc.1",
+            ),
+            ("app-2.0.0-beta.2.AppImage", "app", "2.0.0-beta.2"),
+        ];
+
+        for (filename, expected_id, expected_ver) in cases {
+            let file_path = dir.path().join(filename);
+            fs::write(&file_path, b"dummy").unwrap();
+            let pkg = AppImagePackage::new(&file_path, &cfg, None, None);
+            let (id, ver, _, _) = pkg.read_metadata().unwrap();
+            assert_eq!(id, expected_id, "unexpected id for {}", filename);
+            assert_eq!(ver, expected_ver, "unexpected version for {}", filename);
+        }
+
+        let gh_file = dir.path().join("hibiki-v3.3.0-linux-x64.AppImage");
+        let gh_pkg = AppImagePackage::new(
+            &gh_file,
+            &cfg,
+            Some("owner/hibiki".to_string()),
+            Some("v3.4.0".to_string()),
+        );
+        let (id, ver, _, _) = gh_pkg.read_metadata().unwrap();
+        assert_eq!(id, "hibiki");
+        assert_eq!(ver, "3.4.0");
     }
 }

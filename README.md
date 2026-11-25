@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
+[![Version](https://img.shields.io/badge/version-2.5.1-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
 [![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -15,7 +15,7 @@
 </div>
 
 ```text
-┌─── appmgr v2.5.0 — Universal Linux Application Combine ────────────────────────────────┐
+┌─── appmgr v2.5.1 — Universal Linux Application Combine ────────────────────────────────┐
 │                                                                                        │
 │  :: Fetching release metadata from GitHub: aristocratos/btop                           │
 │                                                                                        │
@@ -143,7 +143,7 @@ Downloads the prebuilt release archive from GitHub Releases, verifies SHA-256 ag
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AleXZahn-max/appmgr/main/install.sh | bash
 ```
-Or clone and run locally (override version via `APPMGR_VERSION=v2.5.0`):
+Or clone and run locally (override version via `APPMGR_VERSION=v2.5.1`):
 ```bash
 git clone https://github.com/AleXZahn-max/appmgr.git
 cd appmgr

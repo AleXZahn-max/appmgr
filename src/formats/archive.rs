@@ -2,7 +2,6 @@ use crate::config::Config;
 use crate::db::PackageRecord;
 use crate::desktop::{create_desktop_entry, is_gui_binary};
 use crate::formats::{connect_package_binaries, StagingDirGuard};
-use regex::Regex;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -102,18 +101,12 @@ impl ArchivePackage {
             .trim_end_matches(".tbz2")
             .trim_end_matches(".tar");
 
-        let ver_re = Regex::new(r"^([a-zA-Z0-9_\-]+?)[-_](v?\d+\..*)").unwrap();
-        let (raw_name, version) = if let Some(caps) = ver_re.captures(clean_stem) {
-            (
-                caps.get(1).unwrap().as_str().to_string(),
-                caps.get(2).unwrap().as_str().to_string(),
-            )
-        } else {
-            let parts: Vec<&str> = clean_stem.split('-').collect();
-            let name = parts.first().unwrap_or(&clean_stem).to_string();
-            let ver = self.tag.clone().unwrap_or_else(|| "1.0.0".to_string());
-            (name, ver)
-        };
+        let (raw_name, version) = crate::formats::parse_stem_name_and_version(
+            clean_stem,
+            self.repo.as_deref(),
+            self.tag.as_deref(),
+            true,
+        );
 
         let pkg_id = Self::sanitize_name(&raw_name);
         let desc = format!("Binary archive application: {}", raw_name);

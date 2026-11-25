@@ -604,6 +604,34 @@ impl Core {
         )
     }
 
+    pub(crate) fn format_install_badge(is_upgrade: bool) -> String {
+        if is_upgrade {
+            c("[UPGRADE]", &[Colors::BOLD, Colors::YELLOW])
+        } else {
+            c("[NEW]", &[Colors::BOLD, Colors::GREEN])
+        }
+    }
+
+    pub(crate) fn format_install_selection_line(
+        name: &str,
+        new_version: &str,
+        upgrade_old_version: Option<&str>,
+    ) -> String {
+        if let Some(old_ver) = upgrade_old_version {
+            format!(
+                "Preparing to replace {} ({} -> {}) ...",
+                c(name, &[Colors::BOLD, Colors::BRIGHT_WHITE]),
+                old_ver,
+                new_version
+            )
+        } else {
+            format!(
+                "Selecting previously unselected package {}.",
+                c(name, &[Colors::BOLD, Colors::BRIGHT_WHITE])
+            )
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn install_local_file(
         &mut self,
@@ -618,6 +646,38 @@ impl Core {
         args: Option<Vec<String>>,
         pinned: bool,
         clean_bin_name: Option<String>,
+    ) -> Result<Option<String>, String> {
+        self.install_local_file_with_context(
+            path,
+            force,
+            assume_yes,
+            repo,
+            github_tag,
+            github_etag,
+            asset_pattern,
+            env,
+            args,
+            pinned,
+            clean_bin_name,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn install_local_file_with_context(
+        &mut self,
+        path: &Path,
+        force: bool,
+        assume_yes: bool,
+        repo: Option<String>,
+        github_tag: Option<String>,
+        github_etag: Option<String>,
+        asset_pattern: Option<String>,
+        env: Option<HashMap<String, String>>,
+        args: Option<Vec<String>>,
+        pinned: bool,
+        clean_bin_name: Option<String>,
+        upgrade_old_version: Option<&str>,
     ) -> Result<Option<String>, String> {
         let fmt = match detect_format(path) {
             Some(f) => f,
@@ -647,7 +707,7 @@ impl Core {
             return Ok(None);
         }
 
-        let (name, version, _desc, size) = match fmt {
+        let (name, mut version, _desc, size) = match fmt {
             PackageFormat::Deb => {
                 let p = DebPackage::new(path, &self.config, repo.clone(), github_tag.clone());
                 let (id, v, d, s, _) = p.read_metadata()?;
@@ -674,13 +734,26 @@ impl Core {
             PackageFormat::ArchNative => unreachable!(),
         };
 
+        let github_version_override = if repo.is_some() {
+            github_tag
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(crate::formats::normalize_version)
+        } else {
+            None
+        };
+        if let Some(ref gh_ver) = github_version_override {
+            version = gh_ver.clone();
+        }
+
         println!(
             "\nPackages (1) {} {}",
             c(
                 &format!("{}-{} [{}]", name, version, fmt.as_str().to_uppercase()),
                 &[Colors::BOLD, Colors::WHITE]
             ),
-            c("[NEW]", &[Colors::BOLD, Colors::GREEN])
+            Self::format_install_badge(upgrade_old_version.is_some())
         );
         let mb = size as f64 / (1024.0 * 1024.0);
         println!(
@@ -704,8 +777,8 @@ impl Core {
 
         let start_time = std::time::Instant::now();
         println!(
-            "\nSelecting previously unselected package {}.",
-            c(&name, &[Colors::BOLD, Colors::BRIGHT_WHITE])
+            "\n{}",
+            Self::format_install_selection_line(&name, &version, upgrade_old_version)
         );
         println!(
             "(Reading database ... {} packages currently installed.)",
@@ -746,6 +819,10 @@ impl Core {
             }
             PackageFormat::ArchNative => unreachable!(),
         };
+
+        if let Some(gh_ver) = github_version_override {
+            record.version = gh_ver;
+        }
 
         if let Some(r) = repo {
             let norm_repo = GitHubClient::parse_repo(&r).unwrap_or(r);

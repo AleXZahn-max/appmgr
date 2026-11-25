@@ -5,10 +5,101 @@ pub mod deb;
 
 use crate::db::PackageRecord;
 use crate::ui::apt_prefix;
+use regex::Regex;
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+const VERSION_PLATFORM_SUFFIXES: &[&str] = &[
+    "x86_64", "x86-64", "aarch64", "appimage", "portable", "riscv64", "ppc64le", "linux64",
+    "linux32", "unknown", "uclibc", "armv7l", "amd64", "arm64", "glibc", "linux", "armv7", "armv6",
+    "armhf", "s390x", "musl", "i686", "i586", "i386", "x64", "gnu", "x86", "pc",
+];
+
+/// Normalizes a version string by stripping a leading `v`/`V` (before a digit)
+/// and trailing platform, architecture, and packaging suffixes while preserving
+/// SemVer pre-release identifiers (e.g. `-alpha`, `-beta`, `-rc.1`, `-dev`, `-pre`, `-nightly`).
+pub fn normalize_version(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let mut s = if (trimmed.starts_with('v') || trimmed.starts_with('V'))
+        && trimmed
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| b.is_ascii_digit())
+    {
+        &trimmed[1..]
+    } else {
+        trimmed
+    };
+
+    loop {
+        let lower = s.to_ascii_lowercase();
+        let mut stripped = false;
+        for suffix in VERSION_PLATFORM_SUFFIXES {
+            if lower.len() > suffix.len() && lower.ends_with(suffix) {
+                let sep_idx = s.len() - suffix.len() - 1;
+                let sep = s.as_bytes()[sep_idx];
+                if matches!(sep, b'-' | b'_' | b'.' | b'+') {
+                    let prefix = &s[..sep_idx];
+                    if prefix.chars().any(|c| c.is_ascii_digit()) {
+                        s = prefix;
+                        stripped = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+
+    s.to_string()
+}
+
+/// Extracts `(raw_name, normalized_version)` from a package filename stem.
+/// When `repo` is `Some`, a non-empty `tag` takes precedence over filename heuristics.
+pub fn parse_stem_name_and_version(
+    stem: &str,
+    repo: Option<&str>,
+    tag: Option<&str>,
+    split_dash_fallback: bool,
+) -> (String, String) {
+    static VER_RE: OnceLock<Regex> = OnceLock::new();
+    let ver_re =
+        VER_RE.get_or_init(|| Regex::new(r"^([a-zA-Z0-9_.\-]+?)[-_]([vV]?\d+\..*)").unwrap());
+
+    let (raw_name, parsed_version) = if let Some(caps) = ver_re.captures(stem) {
+        (
+            caps.get(1).unwrap().as_str().to_string(),
+            Some(normalize_version(caps.get(2).unwrap().as_str())),
+        )
+    } else if split_dash_fallback {
+        let name = stem.split('-').next().unwrap_or(stem).to_string();
+        (name, None)
+    } else {
+        (stem.to_string(), None)
+    };
+
+    let tag_version = tag
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(normalize_version);
+
+    let version = if repo.is_some() {
+        tag_version
+            .or(parsed_version)
+            .unwrap_or_else(|| "1.0.0".to_string())
+    } else {
+        parsed_version
+            .or(tag_version)
+            .unwrap_or_else(|| "1.0.0".to_string())
+    };
+
+    (raw_name, version)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageFormat {
@@ -304,5 +395,53 @@ mod tests {
 
         assert!(is_deb_arch_compatible("arm64", "aarch64"));
         assert!(!is_deb_arch_compatible("amd64", "aarch64"));
+    }
+
+    #[test]
+    fn test_normalize_version_strips_platform_and_keeps_prerelease() {
+        assert_eq!(normalize_version("v3.3.0-linux-x64"), "3.3.0");
+        assert_eq!(normalize_version("v5.4.5-linux-x86_64"), "5.4.5");
+        assert_eq!(normalize_version("v1.2.0-rc.1-linux-amd64"), "1.2.0-rc.1");
+        assert_eq!(normalize_version("2.0.0-beta.2"), "2.0.0-beta.2");
+        assert_eq!(
+            normalize_version("v1.0.0-alpha.1-arm64-musl"),
+            "1.0.0-alpha.1"
+        );
+        assert_eq!(normalize_version("1.5.0-dev-aarch64-gnu"), "1.5.0-dev");
+        assert_eq!(normalize_version("v2.1.0-pre.3-i686-glibc"), "2.1.0-pre.3");
+        assert_eq!(
+            normalize_version("3.0.0-nightly.20261125-portable-appimage"),
+            "3.0.0-nightly.20261125"
+        );
+        assert_eq!(normalize_version("jq-1.7.1"), "jq-1.7.1");
+    }
+
+    #[test]
+    fn test_parse_stem_name_and_version_filenames() {
+        assert_eq!(
+            parse_stem_name_and_version("hibiki-v3.3.0-linux-x64", None, None, false),
+            ("hibiki".to_string(), "3.3.0".to_string())
+        );
+        assert_eq!(
+            parse_stem_name_and_version("Mornye-v5.4.5-linux-x86_64", None, None, false),
+            ("Mornye".to_string(), "5.4.5".to_string())
+        );
+        assert_eq!(
+            parse_stem_name_and_version("tool-v1.2.0-rc.1-linux-amd64", None, None, false),
+            ("tool".to_string(), "1.2.0-rc.1".to_string())
+        );
+        assert_eq!(
+            parse_stem_name_and_version("app-2.0.0-beta.2", None, None, false),
+            ("app".to_string(), "2.0.0-beta.2".to_string())
+        );
+        assert_eq!(
+            parse_stem_name_and_version(
+                "hibiki-v9.9.9-nightly-linux-x64",
+                Some("owner/hibiki"),
+                Some("v3.3.0"),
+                false
+            ),
+            ("hibiki".to_string(), "3.3.0".to_string())
+        );
     }
 }

@@ -881,6 +881,9 @@ impl GitHubClient {
 
     /// Compare two version strings (handles semver, prefixes like 'v', 'jq-', and prerelease tags)
     pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+        let norm1 = crate::formats::normalize_version(v1);
+        let norm2 = crate::formats::normalize_version(v2);
+
         fn extract_parts(v: &str) -> (Vec<u64>, Option<&str>) {
             let start = v.find(|c: char| c.is_ascii_digit()).unwrap_or(v.len());
             let s = &v[start..];
@@ -899,8 +902,8 @@ impl GitHubClient {
             (nums, pre_part)
         }
 
-        let (n1, p1) = extract_parts(v1);
-        let (n2, p2) = extract_parts(v2);
+        let (n1, p1) = extract_parts(&norm1);
+        let (n2, p2) = extract_parts(&norm2);
 
         let max_len = n1.len().max(n2.len());
         for i in 0..max_len {
@@ -966,6 +969,22 @@ mod tests {
         assert_eq!(
             GitHubClient::compare_versions("1.4.0", "1.4.0-beta"),
             std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("v3.3.0-linux-x64", "3.3.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("v5.4.5-linux-x86_64", "5.4.5"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("v1.2.0-rc.1-linux-amd64", "1.2.0"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            GitHubClient::compare_versions("v1.2.0-rc.1-linux-amd64", "1.2.0-rc.1"),
+            std::cmp::Ordering::Equal
         );
     }
 
