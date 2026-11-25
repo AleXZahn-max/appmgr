@@ -71,7 +71,7 @@ impl UpgradeAction {
     fn target_version_display(&self) -> String {
         match self {
             Self::GitHub { new_tag, .. } | Self::AppImageHubGitHub { new_tag, .. } => {
-                new_tag.trim_start_matches('v').to_string()
+                crate::formats::normalize_version(new_tag)
             }
             Self::Apt { apt_pkg, .. } => apt_pkg.version.clone(),
             Self::AppImageHubDirect { new_version, .. } => new_version.clone(),
@@ -302,6 +302,43 @@ pub fn format_release_notes_preview(raw: &str, max_width: usize, max_lines: usiz
     }
 
     out
+}
+
+fn tags_match(local_tag: &str, remote_tag: &str) -> bool {
+    let l = local_tag.trim();
+    let r = remote_tag.trim();
+    if l.is_empty() || r.is_empty() {
+        return false;
+    }
+    l == r || l.trim_start_matches(['v', 'V']) == r.trim_start_matches(['v', 'V'])
+}
+
+/// Evaluates whether a GitHub release represents an upgrade over the installed package.
+pub(crate) fn is_github_upgrade_available(
+    pkg_version: &str,
+    current_tag: Option<&str>,
+    remote_tag: &str,
+) -> bool {
+    if let Some(cur_tag) = current_tag {
+        if tags_match(cur_tag, remote_tag) {
+            return false;
+        }
+    }
+
+    let norm_local = crate::formats::normalize_version(pkg_version);
+    let norm_remote = crate::formats::normalize_version(remote_tag);
+    let ord = GitHubClient::compare_versions(&norm_remote, &norm_local);
+    if ord == std::cmp::Ordering::Greater {
+        return true;
+    }
+
+    if let Some(cur_tag) = current_tag.filter(|t| !t.trim().is_empty()) {
+        if !tags_match(cur_tag, remote_tag) && ord != std::cmp::Ordering::Less {
+            return true;
+        }
+    }
+
+    false
 }
 
 enum UpgradeCheckResult {
@@ -808,13 +845,8 @@ impl Core {
             Ok((StatusCode::NOT_MODIFIED, _, _, _)) => UpgradeCheckResult::UpToDate(pkg, true),
             Ok((StatusCode::OK, Some(release), new_etag, _)) => {
                 let new_tag = release.tag_name.clone();
-                let cur_tag = current_tag.unwrap_or("");
-                let is_newer = GitHubClient::compare_versions(&new_tag, &pkg.version)
-                    == std::cmp::Ordering::Greater
-                    || (new_tag != cur_tag
-                        && !cur_tag.is_empty()
-                        && GitHubClient::compare_versions(&new_tag, &pkg.version)
-                            != std::cmp::Ordering::Less);
+                let eff_tag = current_tag.or(pkg.tag.as_deref());
+                let is_newer = is_github_upgrade_available(&pkg.version, eff_tag, &new_tag);
 
                 if is_newer {
                     let pref_format = prefer.unwrap_or(&pkg.format);
@@ -916,13 +948,8 @@ impl Core {
                 Ok((StatusCode::NOT_MODIFIED, _, _, _)) => UpgradeCheckResult::UpToDate(pkg, true),
                 Ok((StatusCode::OK, Some(release), new_etag, _)) => {
                     let new_tag = release.tag_name.clone();
-                    let cur_tag = stored_tag.as_deref().unwrap_or("");
-                    let is_newer = GitHubClient::compare_versions(&new_tag, &pkg.version)
-                        == std::cmp::Ordering::Greater
-                        || (new_tag != cur_tag
-                            && !cur_tag.is_empty()
-                            && GitHubClient::compare_versions(&new_tag, &pkg.version)
-                                != std::cmp::Ordering::Less);
+                    let eff_tag = stored_tag.as_deref().or(pkg.tag.as_deref());
+                    let is_newer = is_github_upgrade_available(&pkg.version, eff_tag, &new_tag);
                     if is_newer {
                         let pref_fmt = prefer.unwrap_or("appimage");
                         let candidates = gh.filter_assets(
@@ -1036,7 +1063,7 @@ impl Core {
                     .await?;
 
                 let id = self
-                    .install_local_file(
+                    .install_local_file_with_context(
                         &downloaded_file,
                         true,
                         true,
@@ -1048,6 +1075,7 @@ impl Core {
                         args_opt,
                         old_pkg.pinned,
                         None,
+                        Some(old_pkg.version.as_str()),
                     )?
                     .ok_or_else(|| "Installer returned no package record".to_string())?;
                 self.preserve_defaults_on_upgrade(&id, old_pkg);
@@ -1090,7 +1118,7 @@ impl Core {
                     .await?;
 
                 let id = self
-                    .install_local_file(
+                    .install_local_file_with_context(
                         &target_path,
                         true,
                         true,
@@ -1102,6 +1130,7 @@ impl Core {
                         args_opt,
                         old_pkg.pinned,
                         Some(apt_pkg.package.clone()),
+                        Some(old_pkg.version.as_str()),
                     )?
                     .ok_or_else(|| "APT upgrade returned no package record".to_string())?;
 
@@ -1142,7 +1171,7 @@ impl Core {
                     .await?;
 
                 let id = self
-                    .install_local_file(
+                    .install_local_file_with_context(
                         &downloaded_file,
                         true,
                         true,
@@ -1154,6 +1183,7 @@ impl Core {
                         args_opt,
                         old_pkg.pinned,
                         None,
+                        Some(old_pkg.version.as_str()),
                     )?
                     .ok_or_else(|| "AppImageHub upgrade returned no package record".to_string())?;
 
@@ -1185,7 +1215,7 @@ impl Core {
                     .await?;
 
                 let id = self
-                    .install_local_file(
+                    .install_local_file_with_context(
                         &target_path,
                         true,
                         true,
@@ -1197,6 +1227,7 @@ impl Core {
                         args_opt,
                         old_pkg.pinned,
                         Some(app_id.clone()),
+                        Some(old_pkg.version.as_str()),
                     )?
                     .ok_or_else(|| "AppImageHub upgrade returned no package record".to_string())?;
 

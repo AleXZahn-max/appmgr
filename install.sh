@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO="AleXZahn-max/appmgr"
-DEFAULT_VERSION="v2.5.0"
+DEFAULT_VERSION="v2.5.1"
 TARGET_BIN="${APPMGR_INSTALL_DIR:-$HOME/.local/bin}"
 DATA_SHARE="$HOME/.local/share"
 

@@ -73,7 +73,13 @@ impl BinaryPackage {
             .as_deref()
             .map(Self::sanitize_name)
             .unwrap_or_else(|| Self::sanitize_name(raw_name));
-        let version = self.tag.clone().unwrap_or_else(|| "1.0.0".to_string());
+        let version = self
+            .tag
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(crate::formats::normalize_version)
+            .unwrap_or_else(|| "1.0.0".to_string());
         let desc = format!("Standalone binary executable: {}", pkg_id);
 
         Ok((pkg_id, version, desc, size))

@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "appmgr"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "ar",
  "bzip2 0.4.4",

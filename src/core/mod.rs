@@ -753,4 +753,114 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_github_upgrade_detection_prevents_version_loop() {
+        use crate::core::upgrade::is_github_upgrade_available;
+
+        assert!(!is_github_upgrade_available(
+            "v3.3.0-linux-x64",
+            Some("v3.3.0"),
+            "v3.3.0"
+        ));
+        assert!(!is_github_upgrade_available(
+            "v3.3.0-linux-x64",
+            Some("v3.3.0"),
+            "3.3.0"
+        ));
+        assert!(!is_github_upgrade_available(
+            "v3.3.0-linux-x64",
+            None,
+            "3.3.0"
+        ));
+        assert!(!is_github_upgrade_available(
+            "v5.4.5-linux-x86_64",
+            None,
+            "5.4.5"
+        ));
+        assert!(is_github_upgrade_available("3.3.0", None, "3.4.0"));
+        assert!(is_github_upgrade_available(
+            "3.3.0",
+            Some("v3.3.0"),
+            "v3.4.0"
+        ));
+        assert!(is_github_upgrade_available("1.2.0-rc.1", None, "1.2.0"));
+        assert!(is_github_upgrade_available(
+            "1.2.0-rc.1",
+            Some("v1.2.0-rc.1"),
+            "1.2.0"
+        ));
+    }
+
+    #[test]
+    fn test_install_vs_upgrade_output_cosmetics_and_github_tag_priority() {
+        assert_eq!(
+            crate::ui::strip_ansi(&Core::format_install_badge(false)),
+            "[NEW]"
+        );
+        assert_eq!(
+            crate::ui::strip_ansi(&Core::format_install_badge(true)),
+            "[UPGRADE]"
+        );
+        assert_eq!(
+            crate::ui::strip_ansi(&Core::format_install_selection_line(
+                "hibiki", "3.4.0", None
+            )),
+            "Selecting previously unselected package hibiki."
+        );
+        assert_eq!(
+            crate::ui::strip_ansi(&Core::format_install_selection_line(
+                "hibiki",
+                "3.4.0",
+                Some("3.3.0")
+            )),
+            "Preparing to replace hibiki (3.3.0 -> 3.4.0) ..."
+        );
+
+        let dir = tempdir().unwrap();
+        let cfg = Config::resolve_with_env(
+            false,
+            true,
+            false,
+            dir.path().to_path_buf(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        cfg.ensure_dirs().unwrap();
+
+        let src_dir = dir.path().join("pkg_src");
+        fs::create_dir_all(src_dir.join("bin")).unwrap();
+        fs::write(src_dir.join("bin/hibiki"), b"#!/bin/sh\necho ok\n").unwrap();
+        let archive_path = dir.path().join("hibiki-v3.3.0-linux-x64.tar.gz");
+        {
+            let file = fs::File::create(&archive_path).unwrap();
+            let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            tar.append_dir_all(".", &src_dir).unwrap();
+            tar.finish().unwrap();
+        }
+
+        let mut core = Core::new(&cfg).unwrap();
+        let installed = core
+            .install_local_file(
+                &archive_path,
+                false,
+                true,
+                Some("owner/hibiki".to_string()),
+                Some("v3.3.0".to_string()),
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        assert_eq!(installed.as_deref(), Some("hibiki"));
+        let rec = core.db.get("hibiki").unwrap();
+        assert_eq!(rec.version, "3.3.0");
+        assert_eq!(rec.tag.as_deref(), Some("v3.3.0"));
+    }
 }
