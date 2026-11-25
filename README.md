@@ -1,35 +1,34 @@
-# AppMgr — Universal Linux Application Combine
-
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.5.1-brightgreen?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr/releases)
-[![Status](https://img.shields.io/badge/status-active%20development-orange?style=for-the-badge)](#project-status)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75+-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/platform-linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.kernel.org/)
-[![Discord](https://img.shields.io/badge/Discord-AleXZahn__-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
-[![Built With](https://img.shields.io/badge/Built%20With-Antigravity%20(Neon%20xHigh)-9B51E0?style=for-the-badge)](https://github.com/AleXZahn-max/appmgr)
+# AppMgr
 
-**The next-generation Pacman + APT hybrid engine for universal Linux application management, built in blazingly fast Rust.**
+**Universal Linux Application Combine — Pacman + APT hybrid engine written in Rust.**
+
+[![Release](https://img.shields.io/github/v/release/AleXZahn-max/appmgr?style=flat-square&color=2ea043&label=release)](https://github.com/AleXZahn-max/appmgr/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/AleXZahn-max/appmgr/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/AleXZahn-max/appmgr/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/platform-linux-333333?style=flat-square&logo=linux&logoColor=white)](https://www.kernel.org/)
+[![License](https://img.shields.io/github/license/AleXZahn-max/appmgr?style=flat-square&color=555555)](LICENSE)
+
+[Architecture](#key-strengths--architecture) · [Supported Formats](#supported-formats) · [Command Reference](#command-reference--examples)
 
 </div>
 
 ```text
-┌─── appmgr v2.5.1 — Universal Linux Application Combine ────────────────────────────────┐
-│                                                                                        │
-│  :: Fetching release metadata from GitHub: aristocratos/btop                           │
-│                                                                                        │
-│  Packages (1) btop-1.4.0-x86_64.tar.zst [NEW]                                          │
-│  Total Installed Size:   4.95 MiB                                                      │
-│                                                                                        │
-│  :: Proceed with installation? [Y/n] y                                                 │
-│  Downloading btop-x86_64.tar.zst [━━━━━━━━━━━━╸─────────]  62% [1.1/1.8 MiB] (4.2 MiB/s)│
-│  [ OK ] SHA-256 verified (e3b0c44298fc...)                                             │
-│  Unpacking btop (1.4.0) ...                                                            │
-│  [ OK ] Installed launcher: ~/.local/bin/btop                                          │
-│                                                                                        │
-│  :: Transaction completed successfully in 0.42s.                                       │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌── appmgr ── Universal Linux Application Combine ─────────────────────────────────┐
+│                                                                                  │
+│  $ appmgr install aristocratos/btop --isolate                                    │
+│  :: Fetching release metadata from GitHub: aristocratos/btop                     │
+│                                                                                  │
+│  Packages (1) btop-1.4.8 [TAR] [NEW]   Total Installed Size: 2.40 MiB            │
+│  :: Proceed with installation? [Y/n] y                                           │
+│  btop-x86_64.tar.zst [━━━━━━━━━━━━╸───────]  62% [1.5/2.4 MiB] (33.5 MiB/s)      │
+│  [ OK ] SHA-256 verified (e3b0c44298fc...)                                       │
+│  [ OK ] Sandbox profile active: isolated-home (bwrap)                            │
+│  [ OK ] Installed launcher: ~/.local/bin/btop                                    │
+│                                                                                  │
+│  :: Transaction completed successfully in 0.42s.                                 │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -42,7 +41,7 @@
 
 > [!NOTE]
 > ### Authorship & Development
-> This software is developed solo by **AleXZahn** with the assistance of the AI IDE agent **Antigravity (Neon xHigh)**.
+> This software is developed solo by **AleXZahn** with the assistance of the CLI agent **Antigravity (Neon xHigh)**.
 
 ---
 
